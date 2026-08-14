@@ -1,0 +1,20 @@
+{
+  "name": "Danthrax",
+  "class": "Warrior",
+  "active_spec_name": "Protection",
+  "gear": {
+    "item_level_equipped": 415.5,
+    "items": {
+      "head": {"item_id": 1001, "item_level": 415, "enchant": 0, "gems": []},
+      "neck": {"item_id": 1002, "item_level": 415, "enchant": 20, "gems": [1234]}
+    }
+  },
+  "mythic_plus_scores_by_season": [
+    {
+      "season": "season-tww-2",
+      "scores": {
+        "all": 3012.4
+      }
+    }
+  ]
+}

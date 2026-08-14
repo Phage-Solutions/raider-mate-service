@@ -9,18 +9,20 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createCharacter = `-- name: CreateCharacter :one
-INSERT INTO characters (user_id, name, realm, is_main)
-VALUES ($1, $2, $3, $4)
-RETURNING id, user_id, name, realm, class, spec, ilvl, mplus_score, last_synced, is_main
+INSERT INTO characters (user_id, name, realm, region, is_main)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, user_id, name, realm, class, spec, ilvl, mplus_score, last_synced, is_main, region, sync_attempted_at
 `
 
 type CreateCharacterParams struct {
 	UserID uuid.UUID
 	Name   string
 	Realm  string
+	Region string
 	IsMain bool
 }
 
@@ -29,6 +31,7 @@ func (q *Queries) CreateCharacter(ctx context.Context, arg CreateCharacterParams
 		arg.UserID,
 		arg.Name,
 		arg.Realm,
+		arg.Region,
 		arg.IsMain,
 	)
 	var i Character
@@ -43,6 +46,8 @@ func (q *Queries) CreateCharacter(ctx context.Context, arg CreateCharacterParams
 		&i.MplusScore,
 		&i.LastSynced,
 		&i.IsMain,
+		&i.Region,
+		&i.SyncAttemptedAt,
 	)
 	return i, err
 }
@@ -58,7 +63,7 @@ func (q *Queries) DeleteCharacterRoles(ctx context.Context, characterID uuid.UUI
 }
 
 const getCharacterInGuild = `-- name: GetCharacterInGuild :one
-SELECT c.id, c.user_id, c.name, c.realm, c.class, c.spec, c.ilvl, c.mplus_score, c.last_synced, c.is_main FROM characters c
+SELECT c.id, c.user_id, c.name, c.realm, c.class, c.spec, c.ilvl, c.mplus_score, c.last_synced, c.is_main, c.region, c.sync_attempted_at FROM characters c
 JOIN users u ON u.id = c.user_id
 WHERE c.id = $1 AND u.discord_guild_id = $2
 `
@@ -82,6 +87,8 @@ func (q *Queries) GetCharacterInGuild(ctx context.Context, arg GetCharacterInGui
 		&i.MplusScore,
 		&i.LastSynced,
 		&i.IsMain,
+		&i.Region,
+		&i.SyncAttemptedAt,
 	)
 	return i, err
 }
@@ -136,7 +143,7 @@ func (q *Queries) ListCharacterRoles(ctx context.Context, characterID uuid.UUID)
 }
 
 const listCharactersByDiscord = `-- name: ListCharactersByDiscord :many
-SELECT c.id, c.user_id, c.name, c.realm, c.class, c.spec, c.ilvl, c.mplus_score, c.last_synced, c.is_main FROM characters c
+SELECT c.id, c.user_id, c.name, c.realm, c.class, c.spec, c.ilvl, c.mplus_score, c.last_synced, c.is_main, c.region, c.sync_attempted_at FROM characters c
 JOIN users u ON u.id = c.user_id
 WHERE u.discord_id = $1 AND u.discord_guild_id = $2
 ORDER BY c.name
@@ -167,6 +174,8 @@ func (q *Queries) ListCharactersByDiscord(ctx context.Context, arg ListCharacter
 			&i.MplusScore,
 			&i.LastSynced,
 			&i.IsMain,
+			&i.Region,
+			&i.SyncAttemptedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -179,7 +188,7 @@ func (q *Queries) ListCharactersByDiscord(ctx context.Context, arg ListCharacter
 }
 
 const listCharactersByUser = `-- name: ListCharactersByUser :many
-SELECT id, user_id, name, realm, class, spec, ilvl, mplus_score, last_synced, is_main FROM characters
+SELECT id, user_id, name, realm, class, spec, ilvl, mplus_score, last_synced, is_main, region, sync_attempted_at FROM characters
 WHERE user_id = $1
 ORDER BY name
 `
@@ -204,6 +213,8 @@ func (q *Queries) ListCharactersByUser(ctx context.Context, userID uuid.UUID) ([
 			&i.MplusScore,
 			&i.LastSynced,
 			&i.IsMain,
+			&i.Region,
+			&i.SyncAttemptedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -213,6 +224,68 @@ func (q *Queries) ListCharactersByUser(ctx context.Context, userID uuid.UUID) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const listCharactersDueForSync = `-- name: ListCharactersDueForSync :many
+SELECT id, user_id, name, realm, class, spec, ilvl, mplus_score, last_synced, is_main, region, sync_attempted_at FROM characters
+WHERE (last_synced IS NULL OR last_synced < $1)
+  AND (sync_attempted_at IS NULL OR sync_attempted_at < $1)
+ORDER BY sync_attempted_at ASC NULLS FIRST
+LIMIT $2
+`
+
+type ListCharactersDueForSyncParams struct {
+	StaleBefore pgtype.Timestamptz
+	RowLimit    int32
+}
+
+// Oldest-attempted first so a backlog drains fairly instead of starving whoever is
+// always at the bottom of an ID-ordered scan. Ordering by attempt rather than by
+// last_synced keeps a character whose fetch keeps failing from holding the head of
+// every batch.
+func (q *Queries) ListCharactersDueForSync(ctx context.Context, arg ListCharactersDueForSyncParams) ([]Character, error) {
+	rows, err := q.db.Query(ctx, listCharactersDueForSync, arg.StaleBefore, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Character
+	for rows.Next() {
+		var i Character
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.Realm,
+			&i.Class,
+			&i.Spec,
+			&i.Ilvl,
+			&i.MplusScore,
+			&i.LastSynced,
+			&i.IsMain,
+			&i.Region,
+			&i.SyncAttemptedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markCharacterSyncAttempted = `-- name: MarkCharacterSyncAttempted :exec
+UPDATE characters SET sync_attempted_at = now()
+WHERE id = $1
+`
+
+// A failed fetch. last_synced stays put because the cached data did not get any
+// fresher; only the queue position moves.
+func (q *Queries) MarkCharacterSyncAttempted(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markCharacterSyncAttempted, id)
+	return err
 }
 
 const setCharacterRole = `-- name: SetCharacterRole :exec
@@ -229,6 +302,48 @@ type SetCharacterRoleParams struct {
 
 func (q *Queries) SetCharacterRole(ctx context.Context, arg SetCharacterRoleParams) error {
 	_, err := q.db.Exec(ctx, setCharacterRole, arg.CharacterID, arg.Role, arg.Priority)
+	return err
+}
+
+const touchCharacterSynced = `-- name: TouchCharacterSynced :exec
+UPDATE characters SET last_synced = now(), sync_attempted_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) TouchCharacterSynced(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, touchCharacterSynced, id)
+	return err
+}
+
+const updateCharacterFromSync = `-- name: UpdateCharacterFromSync :exec
+UPDATE characters SET
+    class = COALESCE($4, class),
+    spec = COALESCE($5, spec),
+    ilvl = $2,
+    mplus_score = $3,
+    last_synced = now(),
+    sync_attempted_at = now()
+WHERE id = $1
+`
+
+type UpdateCharacterFromSyncParams struct {
+	ID         uuid.UUID
+	Ilvl       pgtype.Numeric
+	MplusScore pgtype.Numeric
+	Class      *string
+	Spec       *string
+}
+
+// COALESCE so a response missing class or spec leaves the stored value alone
+// instead of blanking it.
+func (q *Queries) UpdateCharacterFromSync(ctx context.Context, arg UpdateCharacterFromSyncParams) error {
+	_, err := q.db.Exec(ctx, updateCharacterFromSync,
+		arg.ID,
+		arg.Ilvl,
+		arg.MplusScore,
+		arg.Class,
+		arg.Spec,
+	)
 	return err
 }
 

@@ -31,6 +31,13 @@ Then:
 curl localhost:8080/healthz
 ```
 
+## API testing
+
+The `bruno/` directory is a [Bruno](https://www.usebruno.com/) collection for manually
+exercising the API. Open it in the Bruno app, select the `local` environment, and run
+requests against `make run`. Every endpoint ships its `.bru` file in the same commit
+that adds the endpoint.
+
 ## Development
 
 ```

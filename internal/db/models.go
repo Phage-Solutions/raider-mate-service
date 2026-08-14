@@ -234,22 +234,33 @@ func (ns NullSignupStatus) Value() (driver.Value, error) {
 }
 
 type Character struct {
-	ID         uuid.UUID
-	UserID     uuid.UUID
-	Name       string
-	Realm      string
-	Class      *string
-	Spec       *string
-	Ilvl       pgtype.Numeric
-	MplusScore pgtype.Numeric
-	LastSynced pgtype.Timestamptz
-	IsMain     bool
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	Name            string
+	Realm           string
+	Class           *string
+	Spec            *string
+	Ilvl            pgtype.Numeric
+	MplusScore      pgtype.Numeric
+	LastSynced      pgtype.Timestamptz
+	IsMain          bool
+	Region          string
+	SyncAttemptedAt pgtype.Timestamptz
 }
 
 type CharacterRole struct {
 	CharacterID uuid.UUID
 	Role        RoleEnum
 	Priority    int16
+}
+
+type CharacterSnapshot struct {
+	ID          uuid.UUID
+	CharacterID uuid.UUID
+	CapturedAt  pgtype.Timestamptz
+	Ilvl        pgtype.Numeric
+	MplusScore  pgtype.Numeric
+	Gear        []byte
 }
 
 type CompSlot struct {

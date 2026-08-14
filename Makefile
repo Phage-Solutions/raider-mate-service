@@ -1,4 +1,4 @@
-.PHONY: run test test-integration lint migrate sqlc up down fmt
+.PHONY: run run-worker test test-integration lint migrate sqlc up down fmt
 
 # Local config lives in .env. Nothing in the service reads it, so make exports it
 # for the targets that need it. Real environments set the variables directly.
@@ -9,6 +9,9 @@ endif
 
 run:
 	go run ./cmd/api
+
+run-worker:
+	go run ./cmd/worker
 
 test:
 	go test ./...
