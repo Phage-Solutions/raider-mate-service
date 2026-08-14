@@ -223,13 +223,19 @@ subscriptions (
 ### Signup statuses
 
 ```
-CONFIRMED | TENTATIVE | DECLINED | LATE | BENCH | ABSENT | NO_SHOW
+CONFIRMED | TENTATIVE | DECLINED | LATE | ABSENT | NO_SHOW
 ```
 
 Split by who owns them:
 
 - **Self-reported** (player controls): `CONFIRMED`, `TENTATIVE`, `DECLINED`, `LATE`
-- **Assigned** (officer controls): `BENCH`, `ABSENT`, `NO_SHOW`
+- **Assigned** (officer controls): `ABSENT`, `NO_SHOW`
+
+> `BENCH` is gone as of the step 3 assigner, dropped from the enum in migration
+> `00011`. Bench membership lives on `comp_slots.is_bench` instead, decided fresh by
+> every lock; `signups.status` keeps whatever the raider self-reported (usually
+> `CONFIRMED`) so re-locking a comp can never corrupt it. `ABSENT` and `NO_SHOW` are
+> unaffected and remain officer-controlled.
 
 `late_until` makes "I'll be 20 minutes late" actionable rather than decorative.
 
@@ -309,6 +315,30 @@ greedy loop. Report violations; let the officer decide. An assigner that overrid
 officer judgement gets switched off.
 
 M+ is the same function with `{TANK:1, HEALER:1, DPS:3}` and score-based ranking.
+
+### Auto and manual comps
+
+A comp is a row in `comps`, keyed `(event_id, name)`, and its `mode` says who owns it:
+
+| Mode | Owner | Behaviour |
+|---|---|---|
+| `AUTO` | The assigner | `Lock` recomputes every slot from the current signups |
+| `MANUAL` | The officer | The assigner never runs; the board is whatever was saved |
+
+The two never fight over the same comp. `Lock` on a `MANUAL` comp returns
+`ErrCompIsManual` and writes nothing, so a hand-built board survives any number of
+later locks, however many people sign up in between. Saving a board over an `AUTO`
+comp is refused the same way. Converting between the two is explicit and leaves the
+slots alone, so an officer can lock a comp, flip it to `MANUAL`, and hand-edit the
+assigner's output as a starting point.
+
+Manual saves are whole-board writes, not per-slot edits: the officer's screen holds
+the board and submits it entire, so `slot_index` falls out of the submitted order and
+there is no partial state to reconcile between two officers.
+
+Nothing validates a manual board. A healer placed as a tank, a raider who never signed
+up, an eleven-man Mythic roster: all are written exactly as asked. This is the same
+rule as the constraint step above, applied harder. The officer is the authority.
 
 ---
 

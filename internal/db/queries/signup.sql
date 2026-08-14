@@ -1,7 +1,14 @@
 -- name: CreateEvent :one
-INSERT INTO events (discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+-- difficulty is NULL for MYTHIC_PLUS events, which have no difficulty of their own.
+-- For a raid it decides the comp size rule, so the assigner cannot tell a Mythic
+-- raid from a flex one without it.
+INSERT INTO events (discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
+
+-- name: SetEventDifficulty :exec
+UPDATE events SET difficulty = $2
+WHERE id = $1;
 
 -- name: GetEvent :one
 SELECT * FROM events

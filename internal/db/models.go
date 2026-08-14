@@ -12,6 +12,48 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type CompMode string
+
+const (
+	CompModeAUTO   CompMode = "AUTO"
+	CompModeMANUAL CompMode = "MANUAL"
+)
+
+func (e *CompMode) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CompMode(s)
+	case string:
+		*e = CompMode(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CompMode: %T", src)
+	}
+	return nil
+}
+
+type NullCompMode struct {
+	CompMode CompMode
+	Valid    bool // Valid is true if CompMode is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCompMode) Scan(value interface{}) error {
+	if value == nil {
+		ns.CompMode, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CompMode.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCompMode) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CompMode), nil
+}
+
 type EventType string
 
 const (
@@ -142,6 +184,49 @@ func (ns NullJobStatus) Value() (driver.Value, error) {
 	return string(ns.JobStatus), nil
 }
 
+type RaidDifficulty string
+
+const (
+	RaidDifficultyNORMAL RaidDifficulty = "NORMAL"
+	RaidDifficultyHEROIC RaidDifficulty = "HEROIC"
+	RaidDifficultyMYTHIC RaidDifficulty = "MYTHIC"
+)
+
+func (e *RaidDifficulty) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RaidDifficulty(s)
+	case string:
+		*e = RaidDifficulty(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RaidDifficulty: %T", src)
+	}
+	return nil
+}
+
+type NullRaidDifficulty struct {
+	RaidDifficulty RaidDifficulty
+	Valid          bool // Valid is true if RaidDifficulty is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRaidDifficulty) Scan(value interface{}) error {
+	if value == nil {
+		ns.RaidDifficulty, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RaidDifficulty.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRaidDifficulty) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RaidDifficulty), nil
+}
+
 type RoleEnum string
 
 const (
@@ -193,7 +278,6 @@ const (
 	SignupStatusTENTATIVE SignupStatus = "TENTATIVE"
 	SignupStatusDECLINED  SignupStatus = "DECLINED"
 	SignupStatusLATE      SignupStatus = "LATE"
-	SignupStatusBENCH     SignupStatus = "BENCH"
 	SignupStatusABSENT    SignupStatus = "ABSENT"
 	SignupStatusNOSHOW    SignupStatus = "NO_SHOW"
 )
@@ -263,6 +347,13 @@ type CharacterSnapshot struct {
 	Gear        []byte
 }
 
+type Comp struct {
+	ID      uuid.UUID
+	EventID uuid.UUID
+	Name    string
+	Mode    CompMode
+}
+
 type CompSlot struct {
 	ID          uuid.UUID
 	EventID     uuid.UUID
@@ -271,6 +362,7 @@ type CompSlot struct {
 	Role        RoleEnum
 	SlotIndex   int16
 	IsBench     bool
+	Reason      string
 }
 
 type Event struct {
@@ -283,6 +375,7 @@ type Event struct {
 	CompTemplate   []byte
 	MessageID      *int64
 	ChannelID      *int64
+	Difficulty     *RaidDifficulty
 }
 
 type ScheduledJob struct {

@@ -13,9 +13,9 @@ import (
 )
 
 const createEvent = `-- name: CreateEvent :one
-INSERT INTO events (discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id
+INSERT INTO events (discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty
 `
 
 type CreateEventParams struct {
@@ -27,8 +27,12 @@ type CreateEventParams struct {
 	CompTemplate   []byte
 	MessageID      *int64
 	ChannelID      *int64
+	Difficulty     *RaidDifficulty
 }
 
+// difficulty is NULL for MYTHIC_PLUS events, which have no difficulty of their own.
+// For a raid it decides the comp size rule, so the assigner cannot tell a Mythic
+// raid from a flex one without it.
 func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (Event, error) {
 	row := q.db.QueryRow(ctx, createEvent,
 		arg.DiscordGuildID,
@@ -39,6 +43,7 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (Event
 		arg.CompTemplate,
 		arg.MessageID,
 		arg.ChannelID,
+		arg.Difficulty,
 	)
 	var i Event
 	err := row.Scan(
@@ -51,12 +56,13 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (Event
 		&i.CompTemplate,
 		&i.MessageID,
 		&i.ChannelID,
+		&i.Difficulty,
 	)
 	return i, err
 }
 
 const getEvent = `-- name: GetEvent :one
-SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id FROM events
+SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty FROM events
 WHERE id = $1
 `
 
@@ -73,6 +79,7 @@ func (q *Queries) GetEvent(ctx context.Context, id uuid.UUID) (Event, error) {
 		&i.CompTemplate,
 		&i.MessageID,
 		&i.ChannelID,
+		&i.Difficulty,
 	)
 	return i, err
 }
@@ -114,7 +121,7 @@ func (q *Queries) ListSignupsForEvent(ctx context.Context, eventID uuid.UUID) ([
 }
 
 const listUpcomingEvents = `-- name: ListUpcomingEvents :many
-SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id FROM events
+SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty FROM events
 WHERE discord_guild_id = $1 AND starts_at >= now()
 ORDER BY starts_at ASC
 `
@@ -138,6 +145,7 @@ func (q *Queries) ListUpcomingEvents(ctx context.Context, discordGuildID int64) 
 			&i.CompTemplate,
 			&i.MessageID,
 			&i.ChannelID,
+			&i.Difficulty,
 		); err != nil {
 			return nil, err
 		}
@@ -147,6 +155,21 @@ func (q *Queries) ListUpcomingEvents(ctx context.Context, discordGuildID int64) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const setEventDifficulty = `-- name: SetEventDifficulty :exec
+UPDATE events SET difficulty = $2
+WHERE id = $1
+`
+
+type SetEventDifficultyParams struct {
+	ID         uuid.UUID
+	Difficulty *RaidDifficulty
+}
+
+func (q *Queries) SetEventDifficulty(ctx context.Context, arg SetEventDifficultyParams) error {
+	_, err := q.db.Exec(ctx, setEventDifficulty, arg.ID, arg.Difficulty)
+	return err
 }
 
 const upsertSignup = `-- name: UpsertSignup :one
