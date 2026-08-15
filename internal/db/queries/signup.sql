@@ -101,6 +101,12 @@ ON CONFLICT (event_id, character_id) DO UPDATE SET
     decided_at = NULL
 RETURNING *;
 
+-- name: GetLateRequest :one
+-- Approving needs the event/character/status the request was filed with; the
+-- decide endpoints only carry the request id.
+SELECT * FROM late_signup_requests
+WHERE id = $1;
+
 -- name: ListLateRequests :many
 SELECT * FROM late_signup_requests
 WHERE event_id = $1

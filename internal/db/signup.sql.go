@@ -135,6 +135,29 @@ func (q *Queries) GetEvent(ctx context.Context, id uuid.UUID) (Event, error) {
 	return i, err
 }
 
+const getLateRequest = `-- name: GetLateRequest :one
+SELECT id, event_id, character_id, status, note, state, created_at, decided_at FROM late_signup_requests
+WHERE id = $1
+`
+
+// Approving needs the event/character/status the request was filed with; the
+// decide endpoints only carry the request id.
+func (q *Queries) GetLateRequest(ctx context.Context, id uuid.UUID) (LateSignupRequest, error) {
+	row := q.db.QueryRow(ctx, getLateRequest, id)
+	var i LateSignupRequest
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.CharacterID,
+		&i.Status,
+		&i.Note,
+		&i.State,
+		&i.CreatedAt,
+		&i.DecidedAt,
+	)
+	return i, err
+}
+
 const listConfirmedWithRole = `-- name: ListConfirmedWithRole :many
 SELECT u.discord_id, s.assigned_role
 FROM signups s

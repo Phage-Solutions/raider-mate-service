@@ -269,6 +269,17 @@ func TestLateSignupRequestReRequestUpsertsRatherThanDuplicating(t *testing.T) {
 		t.Fatalf("approving request: %v", err)
 	}
 
+	got, err := q.GetLateRequest(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("getting late request: %v", err)
+	}
+	if got.State != RequestStateAPPROVED {
+		t.Errorf("state = %s, want APPROVED", got.State)
+	}
+	if !got.DecidedAt.Valid {
+		t.Errorf("decided_at = %+v, want set after approval", got.DecidedAt)
+	}
+
 	// Filing again for the same event/character upserts: same row, reset to PENDING.
 	second, err := q.UpsertLateRequest(ctx, UpsertLateRequestParams{
 		EventID: event.ID, CharacterID: character.ID, Status: SignupStatusDECLINED,
