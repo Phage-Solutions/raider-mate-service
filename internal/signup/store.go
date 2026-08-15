@@ -12,7 +12,8 @@ import (
 	"github.com/Phage-Solutions/raider-mate-service/internal/db"
 )
 
-// Store implements eventStore, signupStore, and lateStore over Postgres.
+// Store implements eventStore, signupStore, lateStore, and reminderStore over
+// Postgres.
 type Store struct {
 	pool    *pgxpool.Pool
 	queries *db.Queries
@@ -21,6 +22,26 @@ type Store struct {
 // NewStore builds a Store.
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool, queries: db.New(pool)}
+}
+
+// Transact runs fn against a Store bound to one transaction. Committing or rolling
+// back is Transact's job; fn only returns whether its work succeeded.
+func (s *Store) Transact(ctx context.Context, fn func(ctx context.Context, tx reminderStore) error) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	txStore := &Store{pool: s.pool, queries: s.queries.WithTx(tx)}
+	if err := fn(ctx, txStore); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing tx: %w", err)
+	}
+	return nil
 }
 
 // CreateEvent inserts the event and its initial job schedule in one transaction: the
@@ -258,4 +279,36 @@ func (s *Store) InsertNotification(ctx context.Context, n Notification) error {
 		ChannelID:      n.ChannelID,
 		Payload:        n.Payload,
 	})
+}
+
+func (s *Store) ClaimDueJobs(ctx context.Context, limit int32) ([]db.ScheduledJob, error) {
+	return s.queries.ClaimDueJobs(ctx, limit)
+}
+
+func (s *Store) MarkJobSent(ctx context.Context, id uuid.UUID) error {
+	return s.queries.MarkJobSent(ctx, id)
+}
+
+func (s *Store) MarkJobFailed(ctx context.Context, id uuid.UUID, status db.JobStatus) error {
+	return s.queries.MarkJobFailed(ctx, db.MarkJobFailedParams{ID: id, Status: status})
+}
+
+func (s *Store) ListUndecidedForEvent(ctx context.Context, eventID uuid.UUID) ([]int64, error) {
+	return s.queries.ListUndecidedForEvent(ctx, eventID)
+}
+
+func (s *Store) ListConfirmedWithRole(ctx context.Context, eventID uuid.UUID) ([]ConfirmedSignup, error) {
+	rows, err := s.queries.ListConfirmedWithRole(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ConfirmedSignup, len(rows))
+	for i, row := range rows {
+		out[i] = ConfirmedSignup{DiscordID: row.DiscordID, AssignedRole: row.AssignedRole}
+	}
+	return out, nil
+}
+
+func (s *Store) CountCompSlotsForEvent(ctx context.Context, eventID uuid.UUID) (int64, error) {
+	return s.queries.CountCompSlotsForEvent(ctx, eventID)
 }

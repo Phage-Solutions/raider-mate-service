@@ -13,6 +13,7 @@ import (
 
 	"github.com/Phage-Solutions/raider-mate-service/internal/raiderio"
 	"github.com/Phage-Solutions/raider-mate-service/internal/roster"
+	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
 )
 
 func main() {
@@ -43,10 +44,15 @@ func run() error {
 	store := roster.NewStore(pool)
 	syncer := roster.NewSyncer(client, store, logger)
 
+	reminderStore := signup.NewStore(pool)
+	runner := signup.NewRunner(reminderStore, logger)
+
 	logger.Info("starting worker",
 		"sync_interval", cfg.SyncInterval,
 		"sync_stale_after", cfg.SyncStaleAfter,
 		"sync_batch", cfg.SyncBatch,
+		"job_poll_interval", cfg.JobPollInterval,
+		"job_batch", cfg.JobBatch,
 	)
 
 	tick := func() {
@@ -54,18 +60,28 @@ func run() error {
 			logger.ErrorContext(ctx, "sync tick failed", "error", err)
 		}
 	}
+	jobTick := func() {
+		if err := runner.RunDue(ctx, cfg.JobBatch); err != nil {
+			logger.ErrorContext(ctx, "job tick failed", "error", err)
+		}
+	}
 
-	// Sync once up front. A worker restarted more often than SyncInterval would
-	// otherwise never reach its first tick.
+	// Run both once up front. A worker restarted more often than its interval
+	// would otherwise never reach its first tick.
 	tick()
+	jobTick()
 
 	ticker := time.NewTicker(cfg.SyncInterval)
 	defer ticker.Stop()
+	jobTicker := time.NewTicker(cfg.JobPollInterval)
+	defer jobTicker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
 			tick()
+		case <-jobTicker.C:
+			jobTick()
 		case <-ctx.Done():
 			logger.Info("shutting down")
 			return nil

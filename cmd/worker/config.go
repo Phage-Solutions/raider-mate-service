@@ -16,6 +16,8 @@ type Config struct {
 	SyncBatch           int32
 	RaiderIOBaseURL     string
 	RaiderIOMinInterval time.Duration
+	JobPollInterval     time.Duration
+	JobBatch            int32
 }
 
 func loadConfig() (Config, error) {
@@ -64,6 +66,21 @@ func loadConfig() (Config, error) {
 
 	raiderIOBaseURL := os.Getenv("RAIDERIO_BASE_URL")
 
+	jobPollInterval, err := envDuration("JOB_POLL_INTERVAL", 30*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	if jobPollInterval <= 0 {
+		return Config{}, fmt.Errorf("JOB_POLL_INTERVAL must be positive, got %s", jobPollInterval)
+	}
+	jobBatch, err := envInt32("JOB_BATCH", 100)
+	if err != nil {
+		return Config{}, err
+	}
+	if jobBatch <= 0 {
+		return Config{}, fmt.Errorf("JOB_BATCH must be positive, got %d", jobBatch)
+	}
+
 	return Config{
 		DatabaseURL:         databaseURL,
 		LogLevel:            logLevel,
@@ -72,6 +89,8 @@ func loadConfig() (Config, error) {
 		SyncBatch:           syncBatch,
 		RaiderIOBaseURL:     raiderIOBaseURL,
 		RaiderIOMinInterval: raiderIOMinInterval,
+		JobPollInterval:     jobPollInterval,
+		JobBatch:            jobBatch,
 	}, nil
 }
 
