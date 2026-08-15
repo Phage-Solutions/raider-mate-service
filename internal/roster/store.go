@@ -95,6 +95,13 @@ func (s *Store) ApplySync(ctx context.Context, arg applySyncParams) error {
 		return fmt.Errorf("inserting snapshot: %w", err)
 	}
 
+	// In the same transaction as the snapshot: a raid message is only asked to redraw
+	// for data that actually landed. ApplySync runs only when the syncer found a real
+	// difference, so this does not fire on a no-op refresh.
+	if _, err := q.InsertRosterUpdatedNotifications(ctx, arg.characterID); err != nil {
+		return fmt.Errorf("queueing roster redraws: %w", err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing tx: %w", err)
 	}

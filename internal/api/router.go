@@ -31,12 +31,16 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, logger *slog.Logger) http.Hand
 	signups := signup.NewSignups(signupStore)
 	lateRequests := signup.NewLateRequests(signupStore, logger)
 	raidLeads := signup.NewRaidLeads(signupStore)
+	settings := signup.NewSettings(signupStore)
 	outbox := signup.NewOutbox(signupStore)
 
 	apiMux := http.NewServeMux()
 
 	apiMux.HandleFunc("GET /api/guilds/{gid}/raid-lead-roles", listRaidLeadRolesHandler(raidLeads, logger))
 	apiMux.HandleFunc("PUT /api/guilds/{gid}/raid-lead-roles", putRaidLeadRolesHandler(raidLeads, logger))
+
+	apiMux.HandleFunc("GET /api/guilds/{gid}/settings", getGuildSettingsHandler(settings, logger))
+	apiMux.HandleFunc("PUT /api/guilds/{gid}/settings", putGuildSettingsHandler(settings, logger))
 
 	apiMux.HandleFunc("POST /api/guilds/{gid}/characters", createCharacterHandler(characters, logger))
 	apiMux.HandleFunc("GET /api/guilds/{gid}/characters", listGuildCharactersHandler(characters, logger))

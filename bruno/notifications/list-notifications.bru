@@ -15,8 +15,10 @@ params:query {
 }
 
 docs {
-  The guild is taken from X-Actor-Guild-Id, never from the query string: a
-  caller-supplied filter would let any authenticated raider read every guild's
-  outbox. Claiming is destructive in the sense that a claimed row is hidden from
-  other pollers for the lease (5 minutes) or until it is acked.
+  Claims across every guild. There is no guild filter and no actor header: the outbox
+  has one reader, the bot process, and scoping it per guild would cost a request per
+  guild per tick. Each row carries discord_guild_id so the bot knows where to deliver.
+
+  Claiming is destructive in the sense that a claimed row is hidden from other pollers
+  for the lease (5 minutes) or until it is acked.
 }

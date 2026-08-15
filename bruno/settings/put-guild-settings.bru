@@ -1,0 +1,22 @@
+meta {
+  name: put guild settings
+  type: http
+  seq: 2
+}
+
+put {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/settings
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "events_channel_id": "111222333444555666"
+  }
+}
+
+docs {
+  Guild admin only, and a whole-row write. Omitting events_channel_id clears it, which
+  returns the guild to posting event messages wherever the create command was run.
+}

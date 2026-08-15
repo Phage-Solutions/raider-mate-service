@@ -1,0 +1,17 @@
+meta {
+  name: get guild settings
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/settings
+  body: none
+  auth: none
+}
+
+docs {
+  Readable by any member: the bot loads this on every event creation to decide where
+  to post, and a raid lead is not necessarily a guild admin. The replace link is only
+  present for an admin.
+}

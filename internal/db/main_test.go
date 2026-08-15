@@ -4,15 +4,12 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -52,7 +49,7 @@ func runTests(m *testing.M) int {
 		return 1
 	}
 
-	if err := migrate(connStr); err != nil {
+	if err := migrations.Up(ctx, connStr); err != nil {
 		fmt.Fprintln(os.Stderr, "migrating:", err)
 		return 1
 	}
@@ -65,21 +62,4 @@ func runTests(m *testing.M) int {
 	defer pool.Close()
 
 	return m.Run()
-}
-
-func migrate(connStr string) error {
-	sqlDB, err := sql.Open("pgx", connStr)
-	if err != nil {
-		return fmt.Errorf("opening migration connection: %w", err)
-	}
-	defer sqlDB.Close()
-
-	goose.SetBaseFS(migrations.FS)
-	if err := goose.SetDialect("postgres"); err != nil {
-		return fmt.Errorf("setting goose dialect: %w", err)
-	}
-	if err := goose.Up(sqlDB, "."); err != nil {
-		return fmt.Errorf("applying migrations: %w", err)
-	}
-	return nil
 }

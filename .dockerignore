@@ -1,0 +1,22 @@
+# The build needs the module and the Go source, nothing else. Everything excluded here
+# either bloats the context or is a secret that must never reach an image layer.
+
+.env
+.env.*
+!.env.example
+
+.git
+.github
+.claude
+
+bruno
+docs
+*.md
+
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Local build output, if anyone has run go build by hand.
+/out
+/dist

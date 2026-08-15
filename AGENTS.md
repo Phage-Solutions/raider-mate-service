@@ -40,9 +40,9 @@ make migrate       # goose up
 make sqlc          # regenerate queries
 ```
 
-Always run `make test` and `make lint` before declaring work finished. Run
-`make test-integration` when the change touches `sqlc` queries, migrations, or
-anything implementing a repository interface.
+See hard rule 10 for when these have to run. In short: all four of `make test`,
+`make test-integration`, `make lint`, and a `make sqlc` check, every time, after the
+last edit.
 
 ## Hard rules
 
@@ -68,6 +68,23 @@ Violating these produces broken behaviour, not just untidy code.
    coordinate the change; do not silently reshape a response.
 9. **Do not autocommit and push, at all.** Leave changes staged, uncommitted, for the
    author to review, commit, and push themselves.
+10. **Never report work finished without running `make test`, `make test-integration`,
+    and `make lint`, in that order, after the last edit.** Not "when the change looks
+    like it touches the database". Every time.
+
+    `make test` does not compile files behind `//go:build integration`, so a query
+    signature change that breaks an integration test is invisible to it. `make lint`
+    does not compile them either. Only `make test-integration` (or
+    `go vet -tags=integration ./...`, which is faster and needs no Docker) will tell
+    you the tree builds. A green `make test` alone is not evidence of anything.
+
+    After any `make sqlc` run, re-run all three: regeneration renames and retypes
+    generated params, and the call sites it breaks are usually in test files nobody
+    edited. If a change lands mid-task from another source, verification restarts:
+    what passed before those edits says nothing about what is on disk now.
+
+    Report the actual output. "Tests pass" without having run them since the last
+    edit is a false statement about the state of the repo, not an optimistic one.
 
 ## Structure
 

@@ -192,6 +192,7 @@ const (
 	NotificationKindSIGNUPDEADLINE   NotificationKind = "SIGNUP_DEADLINE"
 	NotificationKindCOMPNAG          NotificationKind = "COMP_NAG"
 	NotificationKindLATEREQUESTFILED NotificationKind = "LATE_REQUEST_FILED"
+	NotificationKindROSTERUPDATED    NotificationKind = "ROSTER_UPDATED"
 )
 
 func (e *NotificationKind) Scan(src interface{}) error {
@@ -232,8 +233,9 @@ func (ns NullNotificationKind) Value() (driver.Value, error) {
 type NotificationTarget string
 
 const (
-	NotificationTargetUSER NotificationTarget = "USER"
-	NotificationTargetROLE NotificationTarget = "ROLE"
+	NotificationTargetUSER    NotificationTarget = "USER"
+	NotificationTargetROLE    NotificationTarget = "ROLE"
+	NotificationTargetMESSAGE NotificationTarget = "MESSAGE"
 )
 
 func (e *NotificationTarget) Scan(src interface{}) error {
@@ -511,6 +513,15 @@ type Event struct {
 type GuildRaidLeadRole struct {
 	DiscordGuildID int64
 	DiscordRoleID  int64
+}
+
+type GuildSetting struct {
+	DiscordGuildID      int64
+	EventsChannelID     *int64
+	UpdatedAt           pgtype.Timestamptz
+	Timezone            *string
+	EventMentionRoleIds []int64
+	EventBannerUrl      *string
 }
 
 type LateSignupRequest struct {

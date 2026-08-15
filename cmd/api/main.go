@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phage-Solutions/raider-mate-service/internal/api"
+	"github.com/Phage-Solutions/raider-mate-service/migrations"
 )
 
 func main() {
@@ -33,6 +34,13 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Migrate before the pool opens: serving requests against a schema the binary
+	// was not built for produces per-query failures instead of one startup error.
+	logger.Info("applying migrations")
+	if err := migrations.Up(ctx, cfg.DatabaseURL); err != nil {
+		return fmt.Errorf("migrating database: %w", err)
+	}
 
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {

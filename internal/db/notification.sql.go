@@ -103,6 +103,36 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 	return err
 }
 
+const insertRosterUpdatedNotifications = `-- name: InsertRosterUpdatedNotifications :execrows
+INSERT INTO notifications (discord_guild_id, event_id, kind, target_kind, channel_id, payload)
+SELECT e.discord_guild_id, e.id, 'ROSTER_UPDATED', 'MESSAGE', e.channel_id, '{}'::jsonb
+FROM events e
+JOIN signups s ON s.event_id = e.id
+WHERE s.character_id = $1
+  AND e.starts_at > now()
+  AND e.message_id IS NOT NULL
+  AND e.channel_id IS NOT NULL
+ON CONFLICT DO NOTHING
+`
+
+// Queues a redraw of every posted, upcoming event this character is signed up to.
+// Written as one INSERT ... SELECT rather than a read followed by inserts so the whole
+// fan-out shares the sync's transaction: no redraw is queued for a snapshot that was
+// rolled back, and none is lost for one that was not.
+//
+// Past events are skipped because nobody re-reads a raid that already happened, and
+// events with no message_id were never posted, so there is nothing to edit.
+//
+// ON CONFLICT DO NOTHING leans on notifications_roster_updated_pending: the second
+// character to change on the same raid finds a redraw already queued and adds nothing.
+func (q *Queries) InsertRosterUpdatedNotifications(ctx context.Context, characterID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, insertRosterUpdatedNotifications, characterID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markNotificationDelivered = `-- name: MarkNotificationDelivered :execrows
 UPDATE notifications SET delivered_at = now()
 WHERE id = $1

@@ -2,10 +2,12 @@ package signup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -318,6 +320,46 @@ func (s *Store) ReplaceRaidLeadRoleIDs(ctx context.Context, discordGuildID int64
 		return fmt.Errorf("committing tx: %w", err)
 	}
 	return nil
+}
+
+// GuildSettings reads a guild's configuration. A guild that has configured nothing has
+// no row, which is not an error: the zero value is the correct answer, and every guild
+// starts there.
+func (s *Store) GuildSettings(ctx context.Context, discordGuildID int64) (GuildSettings, error) {
+	row, err := s.queries.GetGuildSettings(ctx, discordGuildID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return GuildSettings{DiscordGuildID: discordGuildID}, nil
+	}
+	if err != nil {
+		return GuildSettings{}, err
+	}
+	return GuildSettings{
+		DiscordGuildID:      row.DiscordGuildID,
+		EventsChannelID:     row.EventsChannelID,
+		Timezone:            row.Timezone,
+		EventMentionRoleIDs: row.EventMentionRoleIds,
+		EventBannerURL:      row.EventBannerUrl,
+	}, nil
+}
+
+func (s *Store) UpsertGuildSettings(ctx context.Context, settings GuildSettings) (GuildSettings, error) {
+	row, err := s.queries.UpsertGuildSettings(ctx, db.UpsertGuildSettingsParams{
+		DiscordGuildID:      settings.DiscordGuildID,
+		EventsChannelID:     settings.EventsChannelID,
+		Timezone:            settings.Timezone,
+		EventMentionRoleIds: settings.EventMentionRoleIDs,
+		EventBannerUrl:      settings.EventBannerURL,
+	})
+	if err != nil {
+		return GuildSettings{}, err
+	}
+	return GuildSettings{
+		DiscordGuildID:      row.DiscordGuildID,
+		EventsChannelID:     row.EventsChannelID,
+		Timezone:            row.Timezone,
+		EventMentionRoleIDs: row.EventMentionRoleIds,
+		EventBannerURL:      row.EventBannerUrl,
+	}, nil
 }
 
 func (s *Store) ClaimNotifications(ctx context.Context, guildID *int64, claimedBefore time.Time, limit int32) ([]StoredNotification, error) {

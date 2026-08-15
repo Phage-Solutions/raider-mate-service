@@ -41,8 +41,9 @@ func TestNotificationRoundTripsAndClearsFromUndelivered(t *testing.T) {
 		t.Errorf("discord_id = %v, want %d", undelivered[0].DiscordID, discordID)
 	}
 
+	guild := int64(100)
 	rows, err := q.MarkNotificationDelivered(ctx, MarkNotificationDeliveredParams{
-		ID: undelivered[0].ID, DiscordGuildID: 100,
+		ID: undelivered[0].ID, GuildID: &guild,
 	})
 	if err != nil {
 		t.Fatalf("marking delivered: %v", err)
@@ -157,8 +158,9 @@ func TestMarkNotificationDeliveredIgnoresAnotherGuildsRow(t *testing.T) {
 	}
 
 	// Guild 200 acking guild 100's notification would silently suppress its reminder.
+	otherGuild := int64(200)
 	rows, err := q.MarkNotificationDelivered(ctx, MarkNotificationDeliveredParams{
-		ID: claimed[0].ID, DiscordGuildID: 200,
+		ID: claimed[0].ID, GuildID: &otherGuild,
 	})
 	if err != nil {
 		t.Fatalf("marking delivered: %v", err)
