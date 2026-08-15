@@ -7,9 +7,10 @@ import (
 
 // Config holds the values the service reads from the environment at startup.
 type Config struct {
-	DatabaseURL string
-	Addr        string
-	LogLevel    string
+	DatabaseURL   string
+	Addr          string
+	LogLevel      string
+	ServiceAPIKey string
 }
 
 func loadConfig() (Config, error) {
@@ -28,9 +29,15 @@ func loadConfig() (Config, error) {
 		logLevel = "info"
 	}
 
+	serviceAPIKey := os.Getenv("SERVICE_API_KEY")
+	if serviceAPIKey == "" {
+		return Config{}, fmt.Errorf("SERVICE_API_KEY is required")
+	}
+
 	return Config{
-		DatabaseURL: databaseURL,
-		Addr:        addr,
-		LogLevel:    logLevel,
+		DatabaseURL:   databaseURL,
+		Addr:          addr,
+		LogLevel:      logLevel,
+		ServiceAPIKey: serviceAPIKey,
 	}, nil
 }
