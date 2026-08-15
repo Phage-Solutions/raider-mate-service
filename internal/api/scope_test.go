@@ -158,14 +158,14 @@ func TestEventScopedHandlersRefuseAForeignGuild(t *testing.T) {
 			pattern: "GET /api/events/{id}/comps/{name}",
 			target:  "/api/events/" + eventID.String() + "/comps/prog",
 			actor:   homeActor(false),
-			handler: func(e eventLookup) http.HandlerFunc { return getCompHandler(nil, e, logger) },
+			handler: func(e eventLookup) http.HandlerFunc { return getCompHandler(nil, nil, e, logger) },
 		},
 		{
 			name: "lock comp", method: http.MethodPost,
 			pattern: "POST /api/events/{id}/comps/{name}/lock",
 			target:  "/api/events/" + eventID.String() + "/comps/prog/lock",
 			actor:   homeActor(true),
-			handler: func(e eventLookup) http.HandlerFunc { return lockCompHandler(nil, e, logger) },
+			handler: func(e eventLookup) http.HandlerFunc { return lockCompHandler(nil, nil, e, logger) },
 		},
 		{
 			name: "save comp", method: http.MethodPut,
@@ -173,7 +173,7 @@ func TestEventScopedHandlersRefuseAForeignGuild(t *testing.T) {
 			target:  "/api/events/" + eventID.String() + "/comps/prog",
 			body:    `{"slots":[]}`,
 			actor:   homeActor(true),
-			handler: func(e eventLookup) http.HandlerFunc { return saveCompHandler(nil, e, logger) },
+			handler: func(e eventLookup) http.HandlerFunc { return saveCompHandler(nil, nil, e, logger) },
 		},
 		{
 			name: "set comp mode", method: http.MethodPut,
@@ -223,7 +223,7 @@ func TestCompWriteHandlersRequireARaidLead(t *testing.T) {
 			"PUT /api/events/{id}/comps/{name}",
 			"/api/events/" + eventID.String() + "/comps/prog",
 			`{"slots":[]}`,
-			func(e eventLookup) http.HandlerFunc { return saveCompHandler(nil, e, logger) },
+			func(e eventLookup) http.HandlerFunc { return saveCompHandler(nil, nil, e, logger) },
 		},
 		{
 			"set comp mode", http.MethodPut,

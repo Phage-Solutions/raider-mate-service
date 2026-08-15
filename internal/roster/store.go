@@ -161,6 +161,26 @@ func (s *Store) GetCharacterOwner(ctx context.Context, characterID uuid.UUID, di
 	})
 }
 
+func (s *Store) DeleteCharacter(ctx context.Context, characterID uuid.UUID, discordGuildID int64) (bool, error) {
+	rows, err := s.queries.DeleteCharacter(ctx, db.DeleteCharacterParams{
+		ID: characterID, DiscordGuildID: discordGuildID,
+	})
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+func (s *Store) SetCharacterMain(ctx context.Context, characterID uuid.UUID, discordGuildID int64, isMain bool) (bool, error) {
+	rows, err := s.queries.SetCharacterMain(ctx, db.SetCharacterMainParams{
+		ID: characterID, DiscordGuildID: discordGuildID, IsMain: isMain,
+	})
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 func (s *Store) ListCharactersInGuild(ctx context.Context, discordGuildID int64) ([]Character, error) {
 	rows, err := s.queries.ListCharactersInGuild(ctx, discordGuildID)
 	if err != nil {

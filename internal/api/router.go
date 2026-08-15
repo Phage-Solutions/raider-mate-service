@@ -29,7 +29,7 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, logger *slog.Logger) http.Hand
 	signupStore := signup.NewStore(pool)
 	events := signup.NewEvents(signupStore)
 	signups := signup.NewSignups(signupStore)
-	lateRequests := signup.NewLateRequests(signupStore)
+	lateRequests := signup.NewLateRequests(signupStore, logger)
 	raidLeads := signup.NewRaidLeads(signupStore)
 	outbox := signup.NewOutbox(signupStore)
 
@@ -41,6 +41,9 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, logger *slog.Logger) http.Hand
 	apiMux.HandleFunc("POST /api/guilds/{gid}/characters", createCharacterHandler(characters, logger))
 	apiMux.HandleFunc("GET /api/guilds/{gid}/characters", listGuildCharactersHandler(characters, logger))
 	apiMux.HandleFunc("GET /api/users/{did}/characters", listUserCharactersHandler(characters, logger))
+	apiMux.HandleFunc("PATCH /api/characters/{cid}", patchCharacterHandler(characters, logger))
+	apiMux.HandleFunc("DELETE /api/characters/{cid}", deleteCharacterHandler(characters, logger))
+	apiMux.HandleFunc("GET /api/characters/{cid}/roles", getCharacterRolesHandler(characters, logger))
 	apiMux.HandleFunc("PUT /api/characters/{cid}/roles", putCharacterRolesHandler(characters, logger))
 
 	apiMux.HandleFunc("POST /api/guilds/{gid}/events", createEventHandler(events, logger))
@@ -58,10 +61,10 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, logger *slog.Logger) http.Hand
 	apiMux.HandleFunc("POST /api/events/{id}/late-requests/{rid}/reject", rejectLateRequestHandler(lateRequests, events, logger))
 
 	apiMux.HandleFunc("GET /api/events/{id}/comps", listCompsHandler(reader, events, logger))
-	apiMux.HandleFunc("GET /api/events/{id}/comps/{name}", getCompHandler(reader, events, logger))
-	apiMux.HandleFunc("PUT /api/events/{id}/comps/{name}", saveCompHandler(manual, events, logger))
+	apiMux.HandleFunc("GET /api/events/{id}/comps/{name}", getCompHandler(reader, characters, events, logger))
+	apiMux.HandleFunc("PUT /api/events/{id}/comps/{name}", saveCompHandler(manual, characters, events, logger))
 	apiMux.HandleFunc("PUT /api/events/{id}/comps/{name}/mode", setCompModeHandler(manual, events, logger))
-	apiMux.HandleFunc("POST /api/events/{id}/comps/{name}/lock", lockCompHandler(locker, events, logger))
+	apiMux.HandleFunc("POST /api/events/{id}/comps/{name}/lock", lockCompHandler(locker, characters, events, logger))
 
 	apiMux.HandleFunc("GET /api/notifications", listNotificationsHandler(outbox, logger))
 	apiMux.HandleFunc("POST /api/notifications/{id}/delivered", markNotificationDeliveredHandler(outbox, logger))

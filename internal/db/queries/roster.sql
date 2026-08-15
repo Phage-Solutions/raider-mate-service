@@ -26,6 +26,22 @@ SELECT u.discord_id FROM characters c
 JOIN users u ON u.id = c.user_id
 WHERE c.id = $1 AND u.discord_guild_id = $2;
 
+-- name: DeleteCharacter :execrows
+-- Guild-scoped so a character id alone cannot delete another guild's row. The
+-- affected-row count is what tells the caller "no such character here" apart from
+-- "deleted", which a plain :exec cannot.
+DELETE FROM characters c
+USING users u
+WHERE c.user_id = u.id AND c.id = $1 AND u.discord_guild_id = $2;
+
+-- name: SetCharacterMain :execrows
+-- Same guild scoping and the same reason for :execrows. Only is_main is settable:
+-- name, realm and region are the Raider.IO identity the sync job keys on, so
+-- changing them is a delete and a re-register, not an edit.
+UPDATE characters c SET is_main = $3
+FROM users u
+WHERE c.user_id = u.id AND c.id = $1 AND u.discord_guild_id = $2;
+
 -- name: ListCharactersByUser :many
 SELECT * FROM characters
 WHERE user_id = $1

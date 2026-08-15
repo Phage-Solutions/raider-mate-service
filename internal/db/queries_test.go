@@ -185,3 +185,119 @@ func TestPrimaryKeysAreTimeOrdered(t *testing.T) {
 		t.Fatalf("second insert's id did not sort after the first: %s then %s", first.ID, second.ID)
 	}
 }
+
+func TestDeleteCharacterIgnoresAForeignGuild(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 20, DiscordGuildID: 100})
+	if err != nil {
+		t.Fatalf("upserting user: %v", err)
+	}
+	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		UserID: user.ID, Name: "Doomed", Realm: "Area-52", IsMain: true,
+	})
+	if err != nil {
+		t.Fatalf("creating character: %v", err)
+	}
+
+	rows, err := q.DeleteCharacter(ctx, DeleteCharacterParams{ID: character.ID, DiscordGuildID: 999})
+	if err != nil {
+		t.Fatalf("deleting from a foreign guild: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("rows = %d, want 0: a character id alone must not delete another guild's row", rows)
+	}
+
+	rows, err = q.DeleteCharacter(ctx, DeleteCharacterParams{ID: character.ID, DiscordGuildID: 100})
+	if err != nil {
+		t.Fatalf("deleting from the owning guild: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("rows = %d, want 1", rows)
+	}
+
+	if _, err := q.GetCharacterInGuild(ctx, GetCharacterInGuildParams{
+		ID: character.ID, DiscordGuildID: 100,
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("loading a deleted character: got %v, want pgx.ErrNoRows", err)
+	}
+}
+
+func TestDeleteCharacterCascadesToItsRoles(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 21, DiscordGuildID: 100})
+	if err != nil {
+		t.Fatalf("upserting user: %v", err)
+	}
+	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		UserID: user.ID, Name: "Rolled", Realm: "Area-52", IsMain: true,
+	})
+	if err != nil {
+		t.Fatalf("creating character: %v", err)
+	}
+	if err := q.SetCharacterRole(ctx, SetCharacterRoleParams{
+		CharacterID: character.ID, Role: RoleEnumTANK, Priority: 1,
+	}); err != nil {
+		t.Fatalf("setting role: %v", err)
+	}
+
+	if _, err := q.DeleteCharacter(ctx, DeleteCharacterParams{
+		ID: character.ID, DiscordGuildID: 100,
+	}); err != nil {
+		t.Fatalf("deleting character: %v", err)
+	}
+
+	// The API promises a delete takes the raider's history with it; that is the FK
+	// cascade doing the work, not application code, so it is worth pinning here.
+	roles, err := q.ListCharacterRoles(ctx, character.ID)
+	if err != nil {
+		t.Fatalf("listing roles: %v", err)
+	}
+	if len(roles) != 0 {
+		t.Fatalf("roles = %d, want 0 after the character was deleted", len(roles))
+	}
+}
+
+func TestSetCharacterMainIgnoresAForeignGuild(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 22, DiscordGuildID: 100})
+	if err != nil {
+		t.Fatalf("upserting user: %v", err)
+	}
+	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		UserID: user.ID, Name: "Alt", Realm: "Area-52", IsMain: false,
+	})
+	if err != nil {
+		t.Fatalf("creating character: %v", err)
+	}
+
+	rows, err := q.SetCharacterMain(ctx, SetCharacterMainParams{
+		ID: character.ID, DiscordGuildID: 999, IsMain: true,
+	})
+	if err != nil {
+		t.Fatalf("setting main from a foreign guild: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("rows = %d, want 0", rows)
+	}
+
+	if _, err := q.SetCharacterMain(ctx, SetCharacterMainParams{
+		ID: character.ID, DiscordGuildID: 100, IsMain: true,
+	}); err != nil {
+		t.Fatalf("setting main: %v", err)
+	}
+	updated, err := q.GetCharacterInGuild(ctx, GetCharacterInGuildParams{
+		ID: character.ID, DiscordGuildID: 100,
+	})
+	if err != nil {
+		t.Fatalf("loading character: %v", err)
+	}
+	if !updated.IsMain {
+		t.Error("is_main = false, want the flag flipped by the owning guild's write")
+	}
+}

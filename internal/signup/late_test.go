@@ -17,7 +17,7 @@ func TestFileWritesTheRequestAndNotifiesWhenAChannelIsKnown(t *testing.T) {
 	store.event = Event{DiscordGuildID: 100, ChannelID: &channelID}
 	store.roleIDs = []int64{781, 799}
 
-	req, err := NewLateRequests(store).File(context.Background(), LateRequestWrite{
+	req, err := NewLateRequests(store, newTestLogger()).File(context.Background(), LateRequestWrite{
 		EventID: uuid.New(), CharacterID: uuid.New(), Status: db.SignupStatusLATE,
 	})
 	if err != nil {
@@ -45,7 +45,7 @@ func TestFileSkipsTheNotificationWithNoChannelKnown(t *testing.T) {
 	store := newFakeSignupStore()
 	store.event = Event{DiscordGuildID: 100, ChannelID: nil}
 
-	_, err := NewLateRequests(store).File(context.Background(), LateRequestWrite{
+	_, err := NewLateRequests(store, newTestLogger()).File(context.Background(), LateRequestWrite{
 		EventID: uuid.New(), CharacterID: uuid.New(), Status: db.SignupStatusLATE,
 	})
 	if err != nil {
@@ -69,7 +69,7 @@ func TestApproveWritesTheSignupAndMarksDecided(t *testing.T) {
 		t.Fatalf("seeding late request: %v", err)
 	}
 
-	if err := NewLateRequests(store).Approve(context.Background(), req.ID); err != nil {
+	if err := NewLateRequests(store, newTestLogger()).Approve(context.Background(), req.ID); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestApproveCarriesLateUntilThroughToTheSignup(t *testing.T) {
 		t.Fatalf("seeding late request: %v", err)
 	}
 
-	if err := NewLateRequests(store).Approve(context.Background(), req.ID); err != nil {
+	if err := NewLateRequests(store, newTestLogger()).Approve(context.Background(), req.ID); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
 
@@ -116,7 +116,7 @@ func TestApproveRefusesARequestAlreadyDecided(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seeding late request: %v", err)
 	}
-	lateRequests := NewLateRequests(store)
+	lateRequests := NewLateRequests(store, newTestLogger())
 	if err := lateRequests.Reject(context.Background(), req.ID); err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestRejectRefusesARequestAlreadyDecided(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seeding late request: %v", err)
 	}
-	lateRequests := NewLateRequests(store)
+	lateRequests := NewLateRequests(store, newTestLogger())
 	if err := lateRequests.Approve(context.Background(), req.ID); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestRejectMarksDecidedWithoutTouchingTheSignup(t *testing.T) {
 		t.Fatalf("seeding late request: %v", err)
 	}
 
-	if err := NewLateRequests(store).Reject(context.Background(), req.ID); err != nil {
+	if err := NewLateRequests(store, newTestLogger()).Reject(context.Background(), req.ID); err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
 

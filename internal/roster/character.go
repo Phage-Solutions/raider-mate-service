@@ -49,6 +49,8 @@ type characterStore interface {
 	CreateCharacter(ctx context.Context, userID uuid.UUID, in RegisterInput) (Character, error)
 	GetCharacterInGuild(ctx context.Context, characterID uuid.UUID, discordGuildID int64) (Character, error)
 	GetCharacterOwner(ctx context.Context, characterID uuid.UUID, discordGuildID int64) (int64, error)
+	DeleteCharacter(ctx context.Context, characterID uuid.UUID, discordGuildID int64) (bool, error)
+	SetCharacterMain(ctx context.Context, characterID uuid.UUID, discordGuildID int64, isMain bool) (bool, error)
 	ListCharactersInGuild(ctx context.Context, discordGuildID int64) ([]Character, error)
 	ListCharactersByDiscord(ctx context.Context, discordID, discordGuildID int64) ([]Character, error)
 	ReplaceCharacterRoles(ctx context.Context, characterID uuid.UUID, roles []RoleChoice) error
@@ -136,6 +138,38 @@ func (c *Characters) ListForUser(ctx context.Context, discordID, discordGuildID 
 		return nil, fmt.Errorf("listing characters: %w", err)
 	}
 	return characters, nil
+}
+
+// ErrCharacterNotFound means no such character exists in that guild. Whether it
+// never existed or lives in another guild is deliberately not distinguished.
+var ErrCharacterNotFound = errors.New("character not found")
+
+// Delete removes a character. character_roles, signups, comp_slots, snapshots and
+// late requests all carry ON DELETE CASCADE, so this takes the raider's history with
+// it: it is for a mistyped registration, not for a raider leaving.
+func (c *Characters) Delete(ctx context.Context, characterID uuid.UUID, discordGuildID int64) error {
+	deleted, err := c.store.DeleteCharacter(ctx, characterID, discordGuildID)
+	if err != nil {
+		return fmt.Errorf("deleting character: %w", err)
+	}
+	if !deleted {
+		return ErrCharacterNotFound
+	}
+	return nil
+}
+
+// SetMain flags which character is the raider's main. Nothing enforces one main per
+// raider: an alt-heavy roster routinely has none, and the flag is a display hint, not
+// a constraint the assigner reads.
+func (c *Characters) SetMain(ctx context.Context, characterID uuid.UUID, discordGuildID int64, isMain bool) error {
+	updated, err := c.store.SetCharacterMain(ctx, characterID, discordGuildID, isMain)
+	if err != nil {
+		return fmt.Errorf("setting character main: %w", err)
+	}
+	if !updated {
+		return ErrCharacterNotFound
+	}
+	return nil
 }
 
 // SetRoles replaces a character's whole role menu.

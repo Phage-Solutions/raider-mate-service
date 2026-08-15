@@ -1,0 +1,17 @@
+meta {
+  name: patch character
+  type: http
+  seq: 6
+}
+
+patch {
+  url: {{baseUrl}}/api/characters/{{characterId}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "is_main": true
+  }
+}

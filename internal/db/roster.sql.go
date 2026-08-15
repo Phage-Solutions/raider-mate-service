@@ -52,6 +52,28 @@ func (q *Queries) CreateCharacter(ctx context.Context, arg CreateCharacterParams
 	return i, err
 }
 
+const deleteCharacter = `-- name: DeleteCharacter :execrows
+DELETE FROM characters c
+USING users u
+WHERE c.user_id = u.id AND c.id = $1 AND u.discord_guild_id = $2
+`
+
+type DeleteCharacterParams struct {
+	ID             uuid.UUID
+	DiscordGuildID int64
+}
+
+// Guild-scoped so a character id alone cannot delete another guild's row. The
+// affected-row count is what tells the caller "no such character here" apart from
+// "deleted", which a plain :exec cannot.
+func (q *Queries) DeleteCharacter(ctx context.Context, arg DeleteCharacterParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteCharacter, arg.ID, arg.DiscordGuildID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteCharacterRoles = `-- name: DeleteCharacterRoles :exec
 DELETE FROM character_roles
 WHERE character_id = $1
@@ -347,6 +369,29 @@ WHERE id = $1
 func (q *Queries) MarkCharacterSyncAttempted(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, markCharacterSyncAttempted, id)
 	return err
+}
+
+const setCharacterMain = `-- name: SetCharacterMain :execrows
+UPDATE characters c SET is_main = $3
+FROM users u
+WHERE c.user_id = u.id AND c.id = $1 AND u.discord_guild_id = $2
+`
+
+type SetCharacterMainParams struct {
+	ID             uuid.UUID
+	DiscordGuildID int64
+	IsMain         bool
+}
+
+// Same guild scoping and the same reason for :execrows. Only is_main is settable:
+// name, realm and region are the Raider.IO identity the sync job keys on, so
+// changing them is a delete and a re-register, not an edit.
+func (q *Queries) SetCharacterMain(ctx context.Context, arg SetCharacterMainParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setCharacterMain, arg.ID, arg.DiscordGuildID, arg.IsMain)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setCharacterRole = `-- name: SetCharacterRole :exec

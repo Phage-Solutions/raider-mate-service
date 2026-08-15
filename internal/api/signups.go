@@ -14,13 +14,17 @@ import (
 )
 
 type signupResponse struct {
-	ID           string     `json:"id"`
-	CharacterID  string     `json:"character_id"`
-	Status       string     `json:"status"`
-	AssignedRole *string    `json:"assigned_role,omitempty"`
-	LateUntil    *time.Time `json:"late_until,omitempty"`
-	Note         *string    `json:"note,omitempty"`
-	Links        Links      `json:"_links"`
+	ID          string `json:"id"`
+	CharacterID string `json:"character_id"`
+	// Character is populated on list responses, where a client is rendering many rows
+	// at once and would otherwise fetch the roster itself to turn ids into names. The
+	// single-signup writes leave it nil: the caller just named the character.
+	Character    *characterSummary `json:"character,omitempty"`
+	Status       string            `json:"status"`
+	AssignedRole *string           `json:"assigned_role,omitempty"`
+	LateUntil    *time.Time        `json:"late_until,omitempty"`
+	Note         *string           `json:"note,omitempty"`
+	Links        Links             `json:"_links"`
 }
 
 // signupLinks is the HATEOAS decision for one signup: self and withdraw are visible
@@ -257,9 +261,18 @@ func listSignupsHandler(signups *signup.Signups, characters *roster.Characters, 
 			}
 		}
 
+		roster, err := characters.ListForGuild(r.Context(), int64(actor.GuildID)) //nolint:gosec
+		if err != nil {
+			logger.ErrorContext(r.Context(), "listing guild characters", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+			return
+		}
+		byID := characterSummaries(roster)
+
 		out := make([]signupResponse, len(list))
 		for i, s := range list {
 			out[i] = signupToResponse(s, actor.IsRaidLead || owned[s.CharacterID])
+			out[i].Character = lookupCharacter(byID, s.CharacterID)
 		}
 		writeJSON(w, logger, http.StatusOK, out)
 	}

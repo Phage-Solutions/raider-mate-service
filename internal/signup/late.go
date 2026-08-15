@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,12 +81,15 @@ type lateStore interface {
 // LateRequests files, lists, and decides late signup requests: what a player's write
 // becomes once Signups.Write has returned ErrSignupsClosed.
 type LateRequests struct {
-	store lateStore
+	store  lateStore
+	logger *slog.Logger
 }
 
-// NewLateRequests builds a LateRequests.
-func NewLateRequests(store lateStore) *LateRequests {
-	return &LateRequests{store: store}
+// NewLateRequests builds a LateRequests. The logger is here for one case: an event
+// with no channel_id cannot be notified about, and that has to be visible to whoever
+// is wondering why the raid leads never heard about a request.
+func NewLateRequests(store lateStore, logger *slog.Logger) *LateRequests {
+	return &LateRequests{store: store, logger: logger}
 }
 
 // File records a request and notifies the raid lead. Filing writes a
@@ -103,8 +107,13 @@ func (l *LateRequests) File(ctx context.Context, in LateRequestWrite) (LateReque
 	}
 
 	// A ROLE notification with no channel to post in is worse than none; the bot
-	// has not learned this event's channel yet (see events.channel_id).
+	// has not learned this event's channel yet (see events.channel_id). The request
+	// is still filed and still shows up in the raid lead's queue, but nothing pushes
+	// it at them, so this is logged rather than swallowed: a bot that never PATCHes
+	// channel_id otherwise looks like a working system that quietly notifies nobody.
 	if event.ChannelID == nil {
+		l.logger.WarnContext(ctx, "late request filed with no channel to notify in",
+			"event_id", event.ID, "request_id", req.ID)
 		return req, nil
 	}
 

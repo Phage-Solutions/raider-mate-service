@@ -1,0 +1,11 @@
+meta {
+  name: delete character
+  type: http
+  seq: 7
+}
+
+delete {
+  url: {{baseUrl}}/api/characters/{{characterId}}
+  body: none
+  auth: none
+}
