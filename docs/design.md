@@ -101,14 +101,15 @@ Responses carry links describing available transitions:
   "status": "CONFIRMED",
   "_links": {
     "self":     { "href": "/api/events/{id}/signups/{sid}" },
-    "withdraw": { "href": "/api/events/{id}/signups/{sid}", "method": "DELETE" },
-    "bench":    { "href": "/api/events/{id}/signups/{sid}/bench", "method": "POST" }
+    "withdraw": { "href": "/api/events/{id}/signups/{sid}", "method": "DELETE" }
   }
 }
 ```
 
 Links are computed from state and permissions, not hardcoded per endpoint. A player
-sees `withdraw`. An officer additionally sees `bench` and `assign`. The absence of a
+sees `withdraw`. A raid lead additionally sees `assign`. Bench membership is not a
+signup link: it lives on `comp_slots.is_bench`, decided by the assigner or a raid
+lead's manual comp save, never by a direct action on the signup. The absence of a
 link is meaningful: the action is unavailable to this caller right now.
 
 Use a single link-building helper. This is the one place where up-front abstraction is
@@ -229,20 +230,20 @@ CONFIRMED | TENTATIVE | DECLINED | LATE | ABSENT | NO_SHOW
 Split by who owns them:
 
 - **Self-reported** (player controls): `CONFIRMED`, `TENTATIVE`, `DECLINED`, `LATE`
-- **Assigned** (officer controls): `ABSENT`, `NO_SHOW`
+- **Assigned** (raid lead controls): `ABSENT`, `NO_SHOW`
 
 > `BENCH` is gone as of the step 3 assigner, dropped from the enum in migration
 > `00011`. Bench membership lives on `comp_slots.is_bench` instead, decided fresh by
 > every lock; `signups.status` keeps whatever the raider self-reported (usually
 > `CONFIRMED`) so re-locking a comp can never corrupt it. `ABSENT` and `NO_SHOW` are
-> unaffected and remain officer-controlled.
+> unaffected and remain raid-lead-controlled.
 
 `late_until` makes "I'll be 20 minutes late" actionable rather than decorative.
 
 ### The central design decision
 
 **Roles live on the character, not the signup.** Signing up means "I'm coming, here's
-my role menu." The officer (or the assigner) fills `assigned_role` later. Every other
+my role menu." The raid lead (or the assigner) fills `assigned_role` later. Every other
 part of the system (comp building, the assigner, audits) depends on this being
 right, so get it right first.
 
@@ -266,7 +267,7 @@ audit tables are populated as a side effect.
 
 ### Comp locking
 
-`/comp lock` → assigner runs → proposed roster posted → officer adjusts via select
+`/comp lock` → assigner runs → proposed roster posted → raid lead adjusts via select
 menus → confirm pings everyone with their assigned role.
 
 ### Two rules that will bite you otherwise
@@ -279,7 +280,7 @@ menus → confirm pings everyone with their assigned role.
 
 ## 5. Auto-assigner
 
-Not an optimisation problem worth solving optimally. Officers value *predictable*
+Not an optimisation problem worth solving optimally. Raid leads value *predictable*
 over *optimal*. Priority-ordered greedy with a repair pass.
 
 ```
@@ -308,11 +309,11 @@ the DPS pool, leaving you tankless with 14 DPS.
 **The repair pass is not optional.** Greedy regularly produces "1 tank, 15 DPS."
 
 **Every assignment carries a reason string**, e.g. "TANK: priority 1, main, first signup."
-Officers will ask why Bob got benched, and the answer must be a sentence.
+Raid leads will ask why Bob got benched, and the answer must be a sentence.
 
 Constraints (lust, battle rez, raid buffs) are a **validation** step, not part of the
-greedy loop. Report violations; let the officer decide. An assigner that overrides
-officer judgement gets switched off.
+greedy loop. Report violations; let the raid lead decide. An assigner that overrides
+raid lead judgement gets switched off.
 
 M+ is the same function with `{TANK:1, HEALER:1, DPS:3}` and score-based ranking.
 
@@ -323,22 +324,22 @@ A comp is a row in `comps`, keyed `(event_id, name)`, and its `mode` says who ow
 | Mode | Owner | Behaviour |
 |---|---|---|
 | `AUTO` | The assigner | `Lock` recomputes every slot from the current signups |
-| `MANUAL` | The officer | The assigner never runs; the board is whatever was saved |
+| `MANUAL` | The raid lead | The assigner never runs; the board is whatever was saved |
 
 The two never fight over the same comp. `Lock` on a `MANUAL` comp returns
 `ErrCompIsManual` and writes nothing, so a hand-built board survives any number of
 later locks, however many people sign up in between. Saving a board over an `AUTO`
 comp is refused the same way. Converting between the two is explicit and leaves the
-slots alone, so an officer can lock a comp, flip it to `MANUAL`, and hand-edit the
+slots alone, so a raid lead can lock a comp, flip it to `MANUAL`, and hand-edit the
 assigner's output as a starting point.
 
-Manual saves are whole-board writes, not per-slot edits: the officer's screen holds
+Manual saves are whole-board writes, not per-slot edits: the raid lead's screen holds
 the board and submits it entire, so `slot_index` falls out of the submitted order and
-there is no partial state to reconcile between two officers.
+there is no partial state to reconcile between two raid leads.
 
 Nothing validates a manual board. A healer placed as a tank, a raider who never signed
 up, an eleven-man Mythic roster: all are written exactly as asked. This is the same
-rule as the constraint step above, applied harder. The officer is the authority.
+rule as the constraint step above, applied harder. The raid lead is the authority.
 
 ---
 
@@ -352,10 +353,10 @@ edit/delete rather than validating at fire time.
 |---|---|
 | `REMINDER_24H` | DM the **undecided only**. Don't ping people who already signed |
 | `REMINDER_1H` | DM confirmed roster with their assigned role |
-| `SIGNUP_DEADLINE` | Lock signups, ping officer that comp needs finalising |
-| `COMP_NAG` | Ping officer if comp isn't locked 2h out |
+| `SIGNUP_DEADLINE` | Lock signups, ping raid lead that comp needs finalising |
+| `COMP_NAG` | Ping raid lead if comp isn't locked 2h out |
 
-After `signup_deadline`, signups go read-only for players; officers can still add
+After `signup_deadline`, signups go read-only for players; raid leads can still add
 manually. Late signups land in a requests queue rather than silently failing.
 
 ---
@@ -397,7 +398,7 @@ brag about.
 - Comp validator (lust, battle rez, raid buff coverage)
 - Multiple saved comps per event
 - Trial / recruit pipeline
-- Officer audit log
+- Raid lead audit log
 - Roster export (CSV / PDF)
 - Custom branding on embeds
 - Snapshot retention: unlimited (free tier keeps 30 days)
@@ -547,7 +548,7 @@ month.
 4. Assigner + comp lock
 5. Scheduled jobs + reminders
 6. Astro dashboard: roster view, event view
-7. Comp builder (drag-and-drop, SSE for concurrent officers)
+7. Comp builder (drag-and-drop, SSE for concurrent raid leads)
 8. Billing + tier gating
 9. Premium analytics
 

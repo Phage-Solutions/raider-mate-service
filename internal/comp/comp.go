@@ -64,7 +64,7 @@ type Needs struct {
 	MaxRanged *int
 }
 
-// Advisory is something worth telling the officer without blocking the lock. It
+// Advisory is something worth telling the raid lead without blocking the lock. It
 // covers several distinct situations that all read the same way on a comp screen:
 // the pool could not fill a role, the lead's own Template departs from the
 // suggestion, or a Template value had to be clamped to stay non-negative.
@@ -85,7 +85,7 @@ type Assignment struct {
 	Reason      string
 }
 
-// Result is the outcome of Assign: who plays what, and what the officer should know.
+// Result is the outcome of Assign: who plays what, and what the raid lead should know.
 type Result struct {
 	Assignments []Assignment
 	Advisories  []Advisory

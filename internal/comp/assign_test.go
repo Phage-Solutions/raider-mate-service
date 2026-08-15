@@ -255,7 +255,7 @@ func TestAssignNegativeMeleeCapIsExplained(t *testing.T) {
 
 	result := Assign(raiders, Template{MaxMelee: intPtr(-1)}, ModeMythicPlus)
 
-	// The typo still benches them; the point is that the officer is told why.
+	// The typo still benches them; the point is that the raid lead is told why.
 	if len(result.Advisories) == 0 {
 		t.Fatalf("advisories = %+v, want the negative cap reported", result.Advisories)
 	}

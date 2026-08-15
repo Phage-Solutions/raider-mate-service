@@ -43,7 +43,7 @@ func NewLocker(store compStore) *Locker {
 // same event), but signups.assigned_role is a single column: locking any comp_name
 // overwrites it for the whole event, reflecting whichever comp was locked most
 // recently.
-// A comp an officer owns is never recomputed: Lock reports ErrCompIsManual and writes
+// A comp a raid lead owns is never recomputed: Lock reports ErrCompIsManual and writes
 // nothing, so the hand-built board survives any number of later locks.
 func (l *Locker) Lock(ctx context.Context, eventID uuid.UUID, compName string) (Result, error) {
 	compMode, found, err := l.store.CompMode(ctx, eventID, compName)

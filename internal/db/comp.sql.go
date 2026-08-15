@@ -300,7 +300,7 @@ type UpsertCompParams struct {
 
 // Creating a comp is idempotent, but the mode is set once at creation: flipping an
 // existing comp between AUTO and MANUAL is SetCompMode's job, so a stray create
-// cannot quietly hand an officer's hand-built comp back to the assigner.
+// cannot quietly hand a raid lead's hand-built comp back to the assigner.
 func (q *Queries) UpsertComp(ctx context.Context, arg UpsertCompParams) (Comp, error) {
 	row := q.db.QueryRow(ctx, upsertComp, arg.EventID, arg.Name, arg.Mode)
 	var i Comp

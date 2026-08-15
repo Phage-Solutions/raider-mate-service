@@ -20,7 +20,7 @@ load them by default.
 ## Stack
 
 - Go. Postgres via `pgx` + `sqlc`. No ORM. Migrations with `goose`.
-- Background jobs via `river`.
+- Background jobs via a stdlib ticker polling `scheduled_jobs`. No job-queue library.
 - HTTP API is RESTful with HATEOAS link generation.
 - External game data from the Raider.IO API. Cached, never called in a request path.
 

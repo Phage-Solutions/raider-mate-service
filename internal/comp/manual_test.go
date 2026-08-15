@@ -57,7 +57,7 @@ func TestLockRefusesAManualComp(t *testing.T) {
 		t.Fatalf("err = %v, want ErrCompIsManual", err)
 	}
 	if len(store.written) != 0 {
-		t.Errorf("wrote %d comps, want none: the officer's board must survive", len(store.written))
+		t.Errorf("wrote %d comps, want none: the raid lead's board must survive", len(store.written))
 	}
 }
 
@@ -136,7 +136,7 @@ func TestManualSaveRefusesAnAutoComp(t *testing.T) {
 
 func TestManualSaveHonoursPlacementsTheAssignerWouldNeverMake(t *testing.T) {
 	// A healer-only character placed as a tank, and the pool's best tank benched.
-	// Officer judgement is not second-guessed (design.md section 5).
+	// Raid lead judgement is not second-guessed (design.md section 5).
 	store := newFakeCompStore()
 	healer := uuid.New()
 
@@ -148,7 +148,7 @@ func TestManualSaveHonoursPlacementsTheAssignerWouldNeverMake(t *testing.T) {
 	}
 
 	if got := store.written[0].Result.Assignments[0].Role; got != db.RoleEnumTANK {
-		t.Errorf("role = %s, want TANK exactly as the officer asked", got)
+		t.Errorf("role = %s, want TANK exactly as the raid lead asked", got)
 	}
 	if len(store.written[0].Result.Advisories) != 0 {
 		t.Errorf("advisories = %+v, want none: a manual board is not second-guessed", store.written[0].Result.Advisories)
@@ -195,7 +195,7 @@ func TestManualSaveThenLockLeavesTheBoardAlone(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// Three more people sign up and an officer re-locks.
+	// Three more people sign up and a raid lead re-locks.
 	store.pool = []Raider{{
 		CharacterID: uuid.New(),
 		Roles:       []RoleChoice{{Role: db.RoleEnumHEALER, Priority: 1}},

@@ -11,17 +11,17 @@ import (
 )
 
 var (
-	// ErrCompIsManual means the assigner was pointed at a comp an officer owns. The
-	// officer's placements are the comp; recomputing them would throw their work away.
+	// ErrCompIsManual means the assigner was pointed at a comp a raid lead owns. The
+	// raid lead's placements are the comp; recomputing them would throw their work away.
 	ErrCompIsManual = errors.New("comp is manual")
 	// ErrCompIsAuto means a hand-built board was saved over a comp the assigner owns.
 	// Converting is deliberate (SetMode), never a side effect of saving.
 	ErrCompIsAuto = errors.New("comp is auto")
 )
 
-// Placement is one seat an officer decided. There is no priority, score, or reason:
-// the officer's judgement is the reason, and design.md section 5 is explicit that an
-// assigner which overrides officer judgement gets switched off. Nothing here checks
+// Placement is one seat a raid lead decided. There is no priority, score, or reason:
+// the raid lead's judgement is the reason, and design.md section 5 is explicit that an
+// assigner which overrides raid lead judgement gets switched off. Nothing here checks
 // the character's role menu, whether they signed up, or whether the board is a legal
 // raid composition.
 type Placement struct {
@@ -37,7 +37,7 @@ type manualStore interface {
 	ReplaceComp(ctx context.Context, arg ReplaceComp) error
 }
 
-// Manual is the officer-driven half of comp building: whole-board saves for comps the
+// Manual is the raid-lead-driven half of comp building: whole-board saves for comps the
 // assigner does not touch.
 type Manual struct {
 	store manualStore
@@ -52,7 +52,7 @@ func NewManual(store manualStore) *Manual {
 // held before. The comp is created as MANUAL if it does not exist yet; an existing
 // AUTO comp is refused rather than silently converted.
 //
-// This is a whole-board write, not a per-slot edit: the officer's screen holds the
+// This is a whole-board write, not a per-slot edit: the raid lead's screen holds the
 // board and submits it entire, so slot_index falls out of the submitted order and
 // there is no partial state to reconcile.
 func (m *Manual) Save(ctx context.Context, eventID uuid.UUID, compName string, placements []Placement) error {
@@ -81,8 +81,8 @@ func (m *Manual) Save(ctx context.Context, eventID uuid.UUID, compName string, p
 	return nil
 }
 
-// SetMode converts a comp between officer-owned and assigner-owned. Its slots are
-// left alone: converting an auto comp to manual hands the officer the assigner's last
+// SetMode converts a comp between raid-lead-owned and assigner-owned. Its slots are
+// left alone: converting an auto comp to manual hands the raid lead the assigner's last
 // output as a starting point, which is the usual reason to convert at all.
 func (m *Manual) SetMode(ctx context.Context, eventID uuid.UUID, compName string, mode db.CompMode) error {
 	if err := m.store.SetCompMode(ctx, eventID, compName, mode); err != nil {
@@ -91,7 +91,7 @@ func (m *Manual) SetMode(ctx context.Context, eventID uuid.UUID, compName string
 	return nil
 }
 
-// manualAssignments turns an officer's board into rows. slot_index is a position
+// manualAssignments turns a raid lead's board into rows. slot_index is a position
 // within its is_bench partition (see migration 00004), so each partition numbers from
 // zero in submitted order.
 func manualAssignments(placements []Placement) ([]Assignment, error) {
@@ -123,7 +123,7 @@ func manualAssignments(placements []Placement) ([]Assignment, error) {
 			Role:        p.Role,
 			SlotIndex:   index,
 			IsBench:     p.IsBench,
-			Reason:      "MANUAL: placed by an officer",
+			Reason:      "MANUAL: placed by a raid lead",
 		})
 	}
 

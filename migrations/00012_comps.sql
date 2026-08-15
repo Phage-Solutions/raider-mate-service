@@ -1,6 +1,6 @@
 -- +goose Up
 -- Until now a comp existed only implicitly, as whatever comp_name its slots carried.
--- That cannot express an empty comp, and it cannot say who owns one: an officer
+-- That cannot express an empty comp, and it cannot say who owns one: a raid lead
 -- building a comp by hand needs the assigner to keep its hands off, and the assigner
 -- needs somewhere to read that from.
 CREATE TYPE comp_mode AS ENUM ('AUTO', 'MANUAL');

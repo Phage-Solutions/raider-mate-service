@@ -21,7 +21,7 @@ ORDER BY character_id, priority, role;
 -- name: UpsertComp :one
 -- Creating a comp is idempotent, but the mode is set once at creation: flipping an
 -- existing comp between AUTO and MANUAL is SetCompMode's job, so a stray create
--- cannot quietly hand an officer's hand-built comp back to the assigner.
+-- cannot quietly hand a raid lead's hand-built comp back to the assigner.
 INSERT INTO comps (event_id, name, mode)
 VALUES ($1, $2, $3)
 ON CONFLICT (event_id, name) DO UPDATE SET name = excluded.name

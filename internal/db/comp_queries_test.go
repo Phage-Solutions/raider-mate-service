@@ -132,7 +132,7 @@ func TestUpsertCompKeepsTheModeOfAnExistingComp(t *testing.T) {
 		t.Fatalf("creating manual comp: %v", err)
 	}
 
-	// The assigner's write path upserts with AUTO. It must not convert an officer's
+	// The assigner's write path upserts with AUTO. It must not convert a raid lead's
 	// comp back to assigner-owned as a side effect.
 	if _, err := q.UpsertComp(ctx, UpsertCompParams{
 		EventID: event.ID, Name: "hand", Mode: CompModeAUTO,
@@ -157,7 +157,7 @@ func TestCompSlotRequiresItsComp(t *testing.T) {
 
 	err := q.InsertCompSlot(ctx, InsertCompSlotParams{
 		EventID: event.ID, CompName: "ghost", CharacterID: character.ID,
-		Role: RoleEnumTANK, SlotIndex: 0, IsBench: false, Reason: "MANUAL: placed by an officer",
+		Role: RoleEnumTANK, SlotIndex: 0, IsBench: false, Reason: "MANUAL: placed by a raid lead",
 	})
 	if err == nil {
 		t.Fatalf("inserting a slot for a comp that does not exist succeeded, want an FK violation")
@@ -177,7 +177,7 @@ func TestDeleteCompCascadesToItsSlots(t *testing.T) {
 	}
 	if err := q.InsertCompSlot(ctx, InsertCompSlotParams{
 		EventID: event.ID, CompName: "hand", CharacterID: character.ID,
-		Role: RoleEnumTANK, SlotIndex: 0, IsBench: false, Reason: "MANUAL: placed by an officer",
+		Role: RoleEnumTANK, SlotIndex: 0, IsBench: false, Reason: "MANUAL: placed by a raid lead",
 	}); err != nil {
 		t.Fatalf("inserting comp slot: %v", err)
 	}
