@@ -5,11 +5,18 @@ meta {
 }
 
 get {
-  url: {{baseUrl}}/api/notifications?guild_id={{guildId}}
+  url: {{baseUrl}}/api/notifications?limit=50
   body: none
   auth: none
 }
 
 params:query {
-  guild_id: {{guildId}}
+  limit: 50
+}
+
+docs {
+  The guild is taken from X-Actor-Guild-Id, never from the query string: a
+  caller-supplied filter would let any authenticated raider read every guild's
+  outbox. Claiming is destructive in the sense that a claimed row is hidden from
+  other pollers for the lease (5 minutes) or until it is acked.
 }

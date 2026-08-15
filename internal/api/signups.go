@@ -64,7 +64,7 @@ type putSignupRequest struct {
 // ErrSignupsClosed, and this handler files a late_signup_requests row with the same
 // status instead, so the response the bot renders is a request the raid lead can
 // act on rather than a dead end.
-func putSignupHandler(signups *signup.Signups, lateRequests *signup.LateRequests, characters *roster.Characters, logger *slog.Logger) http.HandlerFunc {
+func putSignupHandler(signups *signup.Signups, lateRequests *signup.LateRequests, characters *roster.Characters, events eventLookup, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
 
@@ -76,6 +76,26 @@ func putSignupHandler(signups *signup.Signups, lateRequests *signup.LateRequests
 		characterID, err := pathUUID(r, "cid")
 		if err != nil {
 			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		// Before the ownership check, not inside it: the raid-lead branch below skips
+		// ownership, so scoping here is what stops one guild's lead writing another's.
+		if _, ok := requireEventInGuild(w, r, events, logger, eventID); !ok {
+			return
+		}
+
+		// Two different questions. A raid lead may act on anyone's character, but only
+		// one of their own guild's: without this, a foreign character id would be
+		// written onto their event.
+		inGuild, err := characters.InGuild(r.Context(), characterID, int64(actor.GuildID)) //nolint:gosec
+		if err != nil {
+			logger.ErrorContext(r.Context(), "checking character guild", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if !inGuild {
+			writeError(w, logger, http.StatusNotFound, "character not found")
 			return
 		}
 
@@ -97,7 +117,11 @@ func putSignupHandler(signups *signup.Signups, lateRequests *signup.LateRequests
 			writeError(w, logger, http.StatusBadRequest, err.Error())
 			return
 		}
-		status := db.SignupStatus(body.Status)
+		status, err := parseSignupStatus(body.Status)
+		if err != nil {
+			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		written, err := signups.Write(r.Context(), signup.SignupWrite{
 			EventID: eventID, CharacterID: characterID, Status: status, Note: body.Note, LateUntil: body.LateUntil,
@@ -105,7 +129,7 @@ func putSignupHandler(signups *signup.Signups, lateRequests *signup.LateRequests
 
 		switch {
 		case errors.Is(err, signup.ErrSignupsClosed):
-			fileLateRequest(w, r, lateRequests, logger, eventID, characterID, status, body.Note)
+			fileLateRequest(w, r, lateRequests, logger, eventID, characterID, status, body.Note, body.LateUntil, actor.IsRaidLead)
 		case errors.Is(err, signup.ErrStatusRequiresRaidLead):
 			writeError(w, logger, http.StatusForbidden, "status requires raid lead")
 		case err != nil:
@@ -120,7 +144,7 @@ func putSignupHandler(signups *signup.Signups, lateRequests *signup.LateRequests
 // deleteSignupHandler withdraws a signup, self or raid lead. Past the deadline this
 // closes for players the same way a new signup would: the withdrawal becomes a
 // late request carrying DECLINED, not a silent delete.
-func deleteSignupHandler(signups *signup.Signups, lateRequests *signup.LateRequests, characters *roster.Characters, logger *slog.Logger) http.HandlerFunc {
+func deleteSignupHandler(signups *signup.Signups, lateRequests *signup.LateRequests, characters *roster.Characters, events eventLookup, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
 
@@ -132,6 +156,24 @@ func deleteSignupHandler(signups *signup.Signups, lateRequests *signup.LateReque
 		characterID, err := pathUUID(r, "cid")
 		if err != nil {
 			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		if _, ok := requireEventInGuild(w, r, events, logger, eventID); !ok {
+			return
+		}
+
+		// Two different questions. A raid lead may act on anyone's character, but only
+		// one of their own guild's: without this, a foreign character id would be
+		// written onto their event.
+		inGuild, err := characters.InGuild(r.Context(), characterID, int64(actor.GuildID)) //nolint:gosec
+		if err != nil {
+			logger.ErrorContext(r.Context(), "checking character guild", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if !inGuild {
+			writeError(w, logger, http.StatusNotFound, "character not found")
 			return
 		}
 
@@ -151,7 +193,7 @@ func deleteSignupHandler(signups *signup.Signups, lateRequests *signup.LateReque
 		err = signups.Withdraw(r.Context(), eventID, characterID, actor.IsRaidLead)
 		switch {
 		case errors.Is(err, signup.ErrSignupsClosed):
-			fileLateRequest(w, r, lateRequests, logger, eventID, characterID, db.SignupStatusDECLINED, nil)
+			fileLateRequest(w, r, lateRequests, logger, eventID, characterID, db.SignupStatusDECLINED, nil, nil, actor.IsRaidLead)
 		case err != nil:
 			logger.ErrorContext(r.Context(), "withdrawing signup", "error", err)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
@@ -161,29 +203,37 @@ func deleteSignupHandler(signups *signup.Signups, lateRequests *signup.LateReque
 	}
 }
 
-func fileLateRequest(w http.ResponseWriter, r *http.Request, lateRequests *signup.LateRequests, logger *slog.Logger, eventID, characterID uuid.UUID, status db.SignupStatus, note *string) {
+// fileLateRequest renders the request with the caller's real capabilities. A player
+// who just tripped the deadline is not a raid lead, so they must not be handed
+// approve/reject links they would get a 403 from: the absence of a link is the
+// authorization answer (hard rule 7).
+func fileLateRequest(w http.ResponseWriter, r *http.Request, lateRequests *signup.LateRequests, logger *slog.Logger, eventID, characterID uuid.UUID, status db.SignupStatus, note *string, lateUntil *time.Time, isRaidLead bool) {
 	req, err := lateRequests.File(r.Context(), signup.LateRequestWrite{
-		EventID: eventID, CharacterID: characterID, Status: status, Note: note,
+		EventID: eventID, CharacterID: characterID, Status: status, Note: note, LateUntil: lateUntil,
 	})
 	if err != nil {
 		logger.ErrorContext(r.Context(), "filing late request", "error", err)
 		writeError(w, logger, http.StatusInternalServerError, "internal error")
 		return
 	}
-	writeJSON(w, logger, http.StatusAccepted, lateRequestToResponse(req, true))
+	writeJSON(w, logger, http.StatusAccepted, lateRequestToResponse(req, isRaidLead))
 }
 
 // listSignupsHandler returns every signup for an event. self/withdraw links appear
 // on a raid lead's own view of every row, and on a player's view of only the rows
 // for characters they own: the same authorization the write endpoints enforce,
 // reflected back as what the caller could actually do next.
-func listSignupsHandler(signups *signup.Signups, characters *roster.Characters, logger *slog.Logger) http.HandlerFunc {
+func listSignupsHandler(signups *signup.Signups, characters *roster.Characters, events eventLookup, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
 
 		eventID, err := pathUUID(r, "id")
 		if err != nil {
 			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		if _, ok := requireEventInGuild(w, r, events, logger, eventID); !ok {
 			return
 		}
 

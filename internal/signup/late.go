@@ -3,6 +3,7 @@ package signup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -25,6 +26,11 @@ type Notification struct {
 	Payload        []byte
 }
 
+// ErrRequestDecided means a late request has already been approved or rejected. The
+// approve/reject links disappear once that happens, so reaching the endpoint anyway
+// is a stale bot button or a second raid lead racing the first.
+var ErrRequestDecided = errors.New("late request already decided")
+
 // LateRequest is a late_signup_requests row, translated out of pgtype.
 type LateRequest struct {
 	ID          uuid.UUID
@@ -32,6 +38,7 @@ type LateRequest struct {
 	CharacterID uuid.UUID
 	Status      db.SignupStatus
 	Note        *string
+	LateUntil   *time.Time
 	State       db.RequestState
 	CreatedAt   time.Time
 	DecidedAt   *time.Time
@@ -40,11 +47,15 @@ type LateRequest struct {
 // LateRequestWrite is what a player files: the status they were trying to write when
 // the deadline gate closed on them. A withdrawal past the deadline files DECLINED;
 // the table is named for when this happens, not for the status it carries.
+//
+// LateUntil rides along because it is the field that makes a LATE status actionable:
+// dropping it here would approve "I'll be late" with no idea how late.
 type LateRequestWrite struct {
 	EventID     uuid.UUID
 	CharacterID uuid.UUID
 	Status      db.SignupStatus
 	Note        *string
+	LateUntil   *time.Time
 }
 
 // lateRequestPayload is what a bot needs to render a LATE_REQUEST_FILED notification.
@@ -131,14 +142,33 @@ func (l *LateRequests) List(ctx context.Context, eventID uuid.UUID) ([]LateReque
 	return reqs, nil
 }
 
+// Get loads one late request. The API layer needs it to check the request actually
+// belongs to the event in the path before acting on it.
+func (l *LateRequests) Get(ctx context.Context, id uuid.UUID) (LateRequest, error) {
+	req, err := l.store.GetLateRequest(ctx, id)
+	if err != nil {
+		return LateRequest{}, fmt.Errorf("loading late request: %w", err)
+	}
+	return req, nil
+}
+
 // Approve upserts the signup with the requested status and marks the request decided.
+// Approving something already decided is refused: without the guard, a stale button
+// can flip a rejection into a real signup.
 func (l *LateRequests) Approve(ctx context.Context, id uuid.UUID) error {
 	req, err := l.store.GetLateRequest(ctx, id)
 	if err != nil {
 		return fmt.Errorf("loading late request: %w", err)
 	}
+	if req.State != db.RequestStatePENDING {
+		return fmt.Errorf("approving late request: %w", ErrRequestDecided)
+	}
 	if _, err := l.store.UpsertSignup(ctx, SignupWrite{
-		EventID: req.EventID, CharacterID: req.CharacterID, Status: req.Status, Note: req.Note,
+		EventID:     req.EventID,
+		CharacterID: req.CharacterID,
+		Status:      req.Status,
+		Note:        req.Note,
+		LateUntil:   req.LateUntil,
 	}); err != nil {
 		return fmt.Errorf("writing approved signup: %w", err)
 	}
@@ -150,6 +180,13 @@ func (l *LateRequests) Approve(ctx context.Context, id uuid.UUID) error {
 
 // Reject marks the request decided without touching the signup.
 func (l *LateRequests) Reject(ctx context.Context, id uuid.UUID) error {
+	req, err := l.store.GetLateRequest(ctx, id)
+	if err != nil {
+		return fmt.Errorf("loading late request: %w", err)
+	}
+	if req.State != db.RequestStatePENDING {
+		return fmt.Errorf("rejecting late request: %w", ErrRequestDecided)
+	}
 	if err := l.store.DecideLateRequest(ctx, id, db.RequestStateREJECTED); err != nil {
 		return fmt.Errorf("marking late request rejected: %w", err)
 	}

@@ -66,8 +66,8 @@ Violating these produces broken behaviour, not just untidy code.
 8. **API responses are the contract for two other repos.** A breaking change here
    breaks the bot and the dashboard in their own release cycles. Version the API or
    coordinate the change; do not silently reshape a response.
-9. **Do not autocommit and push, at all.** Leave changes staged or committed locally
-   for the author to review and push themselves.
+9. **Do not autocommit and push, at all.** Leave changes staged, uncommitted, for the
+   author to review, commit, and push themselves.
 
 ## Structure
 

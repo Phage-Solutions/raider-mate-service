@@ -1,0 +1,25 @@
+meta {
+  name: set comp mode
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{baseUrl}}/api/events/{{eventId}}/comps/{{compName}}/mode
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "mode": "MANUAL"
+  }
+}
+
+docs {
+  Raid lead only. AUTO or MANUAL. The slots are left alone, so converting an AUTO
+  comp to MANUAL hands the raid lead the assigner's last output as a starting point.
+
+  An AUTO comp is the assigner's: locking recomputes every slot. A MANUAL comp is
+  the raid lead's: locking it returns 409 and writes nothing.
+}

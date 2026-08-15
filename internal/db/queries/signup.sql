@@ -68,12 +68,24 @@ ORDER BY created_at ASC, id ASC;
 -- name: ListUndecidedForEvent :many
 -- Grouped by discord_id, not by character: a raider with four alts and no signup is
 -- one person who has not answered, and four DMs would be a bug.
+--
+-- NOT EXISTS over the whole user, not a LEFT JOIN per character. A join emits one row
+-- per *unsigned character*, so a raider who answered on their main but owns three
+-- untouched alts still matched and got nagged about an event they had already
+-- answered. Answering on any one character answers for the person.
 SELECT DISTINCT u.discord_id
-FROM characters c
-JOIN users u ON u.id = c.user_id
+FROM users u
 JOIN events e ON e.discord_guild_id = u.discord_guild_id
-LEFT JOIN signups s ON s.event_id = e.id AND s.character_id = c.id
-WHERE e.id = $1 AND s.id IS NULL
+WHERE e.id = $1
+  AND EXISTS (
+      SELECT 1 FROM characters c
+      WHERE c.user_id = u.id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM signups s
+      JOIN characters c2 ON c2.id = s.character_id
+      WHERE s.event_id = e.id AND c2.user_id = u.id
+  )
 ORDER BY u.discord_id;
 
 -- name: ListConfirmedWithRole :many
@@ -92,11 +104,12 @@ SELECT count(*) FROM comp_slots WHERE event_id = $1;
 -- name: UpsertLateRequest :one
 -- A re-request resets state to PENDING and clears any prior decision, since the
 -- unique constraint makes this an upsert rather than a pile of rows.
-INSERT INTO late_signup_requests (event_id, character_id, status, note)
-VALUES ($1, $2, $3, $4)
+INSERT INTO late_signup_requests (event_id, character_id, status, note, late_until)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (event_id, character_id) DO UPDATE SET
     status = excluded.status,
     note = excluded.note,
+    late_until = excluded.late_until,
     state = 'PENDING',
     decided_at = NULL
 RETURNING *;

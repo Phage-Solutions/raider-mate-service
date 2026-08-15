@@ -35,13 +35,8 @@ func listRaidLeadRolesHandler(raidLeads *signup.RaidLeads, logger *slog.Logger) 
 			return
 		}
 
-		guildID, err := pathSnowflake(r, "gid")
-		if err != nil {
-			writeError(w, logger, http.StatusBadRequest, err.Error())
-			return
-		}
-		if guildID != int64(actor.GuildID) { //nolint:gosec
-			writeError(w, logger, http.StatusForbidden, "guild mismatch")
+		guildID, ok := requireGuildPath(w, r, logger, "gid")
+		if !ok {
 			return
 		}
 
@@ -69,13 +64,8 @@ func putRaidLeadRolesHandler(raidLeads *signup.RaidLeads, logger *slog.Logger) h
 			return
 		}
 
-		guildID, err := pathSnowflake(r, "gid")
-		if err != nil {
-			writeError(w, logger, http.StatusBadRequest, err.Error())
-			return
-		}
-		if guildID != int64(actor.GuildID) { //nolint:gosec
-			writeError(w, logger, http.StatusForbidden, "guild mismatch")
+		guildID, ok := requireGuildPath(w, r, logger, "gid")
+		if !ok {
 			return
 		}
 

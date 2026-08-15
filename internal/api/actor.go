@@ -73,6 +73,11 @@ func parseSnowflake(s string) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid snowflake %q: %w", s, err)
 	}
+	// Zero is never a real snowflake, and an actor whose guild id is 0 would scope
+	// every guild-scoped query to a guild that cannot exist.
+	if id == 0 {
+		return 0, fmt.Errorf("invalid snowflake %q", s)
+	}
 	return id, nil
 }
 

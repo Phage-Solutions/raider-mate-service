@@ -9,7 +9,69 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const claimNotifications = `-- name: ClaimNotifications :many
+UPDATE notifications SET claimed_at = now()
+WHERE id IN (
+    SELECT n.id FROM notifications n
+    WHERE n.delivered_at IS NULL
+      AND (n.claimed_at IS NULL OR n.claimed_at < $1)
+      AND ($2::bigint IS NULL OR n.discord_guild_id = $2)
+    ORDER BY n.created_at ASC
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, channel_id, payload, created_at, delivered_at, claimed_at
+`
+
+type ClaimNotificationsParams struct {
+	ClaimedBefore pgtype.Timestamptz
+	GuildID       *int64
+	RowLimit      int32
+}
+
+// Claiming, not just reading. The ack arrives in a later HTTP request, so no
+// transaction can span send and ack and row locks cannot help: two bot replicas
+// polling the same window would both read the same rows and DM every raider twice.
+// Stamping claimed_at inside the same statement hands each row to one poller.
+//
+// claimed_before re-opens a lease so a bot that claimed rows and died still gets them
+// redelivered. That keeps delivery at-least-once, which reminders tolerate; what it
+// removes is the duplicate storm on every tick.
+func (q *Queries) ClaimNotifications(ctx context.Context, arg ClaimNotificationsParams) ([]Notification, error) {
+	rows, err := q.db.Query(ctx, claimNotifications, arg.ClaimedBefore, arg.GuildID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Notification
+	for rows.Next() {
+		var i Notification
+		if err := rows.Scan(
+			&i.ID,
+			&i.DiscordGuildID,
+			&i.EventID,
+			&i.Kind,
+			&i.TargetKind,
+			&i.DiscordID,
+			&i.RoleIds,
+			&i.ChannelID,
+			&i.Payload,
+			&i.CreatedAt,
+			&i.DeliveredAt,
+			&i.ClaimedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
 const insertNotification = `-- name: InsertNotification :exec
 INSERT INTO notifications (discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, channel_id, payload)
@@ -41,57 +103,23 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 	return err
 }
 
-const listUndeliveredNotifications = `-- name: ListUndeliveredNotifications :many
-SELECT id, discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, channel_id, payload, created_at, delivered_at FROM notifications
-WHERE delivered_at IS NULL
-  AND ($1::bigint IS NULL OR discord_guild_id = $1)
-ORDER BY created_at ASC
-LIMIT $2
-`
-
-type ListUndeliveredNotificationsParams struct {
-	GuildID  *int64
-	RowLimit int32
-}
-
-func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUndeliveredNotificationsParams) ([]Notification, error) {
-	rows, err := q.db.Query(ctx, listUndeliveredNotifications, arg.GuildID, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Notification
-	for rows.Next() {
-		var i Notification
-		if err := rows.Scan(
-			&i.ID,
-			&i.DiscordGuildID,
-			&i.EventID,
-			&i.Kind,
-			&i.TargetKind,
-			&i.DiscordID,
-			&i.RoleIds,
-			&i.ChannelID,
-			&i.Payload,
-			&i.CreatedAt,
-			&i.DeliveredAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const markNotificationDelivered = `-- name: MarkNotificationDelivered :exec
+const markNotificationDelivered = `-- name: MarkNotificationDelivered :execrows
 UPDATE notifications SET delivered_at = now()
-WHERE id = $1
+WHERE id = $1 AND discord_guild_id = $2
 `
 
-func (q *Queries) MarkNotificationDelivered(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, markNotificationDelivered, id)
-	return err
+type MarkNotificationDeliveredParams struct {
+	ID             uuid.UUID
+	DiscordGuildID int64
+}
+
+// Guild-scoped: without it, any caller could ack another guild's notification by id
+// and silently suppress their reminders. Returning the row count lets the caller tell
+// "not yours or not found" from "done".
+func (q *Queries) MarkNotificationDelivered(ctx context.Context, arg MarkNotificationDeliveredParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markNotificationDelivered, arg.ID, arg.DiscordGuildID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

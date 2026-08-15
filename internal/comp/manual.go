@@ -17,7 +17,14 @@ var (
 	// ErrCompIsAuto means a hand-built board was saved over a comp the assigner owns.
 	// Converting is deliberate (SetMode), never a side effect of saving.
 	ErrCompIsAuto = errors.New("comp is auto")
+	// ErrInvalidBoard means the board could not be written as given. This covers only
+	// what the schema itself would reject, never a judgement about the composition.
+	ErrInvalidBoard = errors.New("invalid board")
 )
+
+// ManualReason is the reason recorded against every hand-placed slot. comp_slots.reason
+// is NOT NULL, and "a raid lead put them there" is the honest answer.
+const ManualReason = "MANUAL: placed by a raid lead"
 
 // Placement is one seat a raid lead decided. There is no priority, score, or reason:
 // the raid lead's judgement is the reason, and design.md section 5 is explicit that an
@@ -102,12 +109,12 @@ func manualAssignments(placements []Placement) ([]Assignment, error) {
 	for _, p := range placements {
 		if _, dup := seen[p.CharacterID]; dup {
 			// The schema would reject this anyway; saying so beats a raw SQLSTATE.
-			return nil, fmt.Errorf("character %s appears twice in the board", p.CharacterID)
+			return nil, fmt.Errorf("%w: character %s appears twice", ErrInvalidBoard, p.CharacterID)
 		}
 		seen[p.CharacterID] = struct{}{}
 
 		if p.Role == "" {
-			return nil, fmt.Errorf("character %s has no role; comp_slots.role is NOT NULL", p.CharacterID)
+			return nil, fmt.Errorf("%w: character %s has no role", ErrInvalidBoard, p.CharacterID)
 		}
 
 		index := seated
@@ -123,7 +130,7 @@ func manualAssignments(placements []Placement) ([]Assignment, error) {
 			Role:        p.Role,
 			SlotIndex:   index,
 			IsBench:     p.IsBench,
-			Reason:      "MANUAL: placed by a raid lead",
+			Reason:      ManualReason,
 		})
 	}
 

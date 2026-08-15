@@ -2,9 +2,11 @@ package roster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Phage-Solutions/raider-mate-service/internal/db"
 )
@@ -91,10 +93,29 @@ func (c *Characters) GetInGuild(ctx context.Context, characterID uuid.UUID, disc
 	return character, nil
 }
 
+// InGuild reports whether characterID exists in discordGuildID at all, regardless of
+// who owns it. Ownership answers "is this mine"; this answers "is this ours", which
+// is the question for a raid lead acting on someone else's character.
+func (c *Characters) InGuild(ctx context.Context, characterID uuid.UUID, discordGuildID int64) (bool, error) {
+	_, err := c.store.GetCharacterInGuild(ctx, characterID, discordGuildID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("loading character: %w", err)
+	}
+	return true, nil
+}
+
 // OwnedByDiscord reports whether characterID belongs to discordID within
-// discordGuildID.
+// discordGuildID. A character that does not exist, or lives in another guild, is
+// simply not owned: that is a "no", not an infrastructure failure, and callers turn
+// it into a 403 rather than a 500 and a spurious error log.
 func (c *Characters) OwnedByDiscord(ctx context.Context, characterID uuid.UUID, discordGuildID, discordID int64) (bool, error) {
 	owner, err := c.store.GetCharacterOwner(ctx, characterID, discordGuildID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("loading character owner: %w", err)
 	}

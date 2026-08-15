@@ -136,7 +136,7 @@ func (q *Queries) GetEvent(ctx context.Context, id uuid.UUID) (Event, error) {
 }
 
 const getLateRequest = `-- name: GetLateRequest :one
-SELECT id, event_id, character_id, status, note, state, created_at, decided_at FROM late_signup_requests
+SELECT id, event_id, character_id, status, note, state, created_at, decided_at, late_until FROM late_signup_requests
 WHERE id = $1
 `
 
@@ -154,6 +154,7 @@ func (q *Queries) GetLateRequest(ctx context.Context, id uuid.UUID) (LateSignupR
 		&i.State,
 		&i.CreatedAt,
 		&i.DecidedAt,
+		&i.LateUntil,
 	)
 	return i, err
 }
@@ -195,7 +196,7 @@ func (q *Queries) ListConfirmedWithRole(ctx context.Context, eventID uuid.UUID) 
 }
 
 const listLateRequests = `-- name: ListLateRequests :many
-SELECT id, event_id, character_id, status, note, state, created_at, decided_at FROM late_signup_requests
+SELECT id, event_id, character_id, status, note, state, created_at, decided_at, late_until FROM late_signup_requests
 WHERE event_id = $1
 ORDER BY created_at DESC
 `
@@ -218,6 +219,7 @@ func (q *Queries) ListLateRequests(ctx context.Context, eventID uuid.UUID) ([]La
 			&i.State,
 			&i.CreatedAt,
 			&i.DecidedAt,
+			&i.LateUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -267,16 +269,28 @@ func (q *Queries) ListSignupsForEvent(ctx context.Context, eventID uuid.UUID) ([
 
 const listUndecidedForEvent = `-- name: ListUndecidedForEvent :many
 SELECT DISTINCT u.discord_id
-FROM characters c
-JOIN users u ON u.id = c.user_id
+FROM users u
 JOIN events e ON e.discord_guild_id = u.discord_guild_id
-LEFT JOIN signups s ON s.event_id = e.id AND s.character_id = c.id
-WHERE e.id = $1 AND s.id IS NULL
+WHERE e.id = $1
+  AND EXISTS (
+      SELECT 1 FROM characters c
+      WHERE c.user_id = u.id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM signups s
+      JOIN characters c2 ON c2.id = s.character_id
+      WHERE s.event_id = e.id AND c2.user_id = u.id
+  )
 ORDER BY u.discord_id
 `
 
 // Grouped by discord_id, not by character: a raider with four alts and no signup is
 // one person who has not answered, and four DMs would be a bug.
+//
+// NOT EXISTS over the whole user, not a LEFT JOIN per character. A join emits one row
+// per *unsigned character*, so a raider who answered on their main but owns three
+// untouched alts still matched and got nagged about an event they had already
+// answered. Answering on any one character answers for the person.
 func (q *Queries) ListUndecidedForEvent(ctx context.Context, id uuid.UUID) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listUndecidedForEvent, id)
 	if err != nil {
@@ -404,14 +418,15 @@ func (q *Queries) UpdateEvent(ctx context.Context, arg UpdateEventParams) (Event
 }
 
 const upsertLateRequest = `-- name: UpsertLateRequest :one
-INSERT INTO late_signup_requests (event_id, character_id, status, note)
-VALUES ($1, $2, $3, $4)
+INSERT INTO late_signup_requests (event_id, character_id, status, note, late_until)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (event_id, character_id) DO UPDATE SET
     status = excluded.status,
     note = excluded.note,
+    late_until = excluded.late_until,
     state = 'PENDING',
     decided_at = NULL
-RETURNING id, event_id, character_id, status, note, state, created_at, decided_at
+RETURNING id, event_id, character_id, status, note, state, created_at, decided_at, late_until
 `
 
 type UpsertLateRequestParams struct {
@@ -419,6 +434,7 @@ type UpsertLateRequestParams struct {
 	CharacterID uuid.UUID
 	Status      SignupStatus
 	Note        *string
+	LateUntil   pgtype.Timestamptz
 }
 
 // A re-request resets state to PENDING and clears any prior decision, since the
@@ -429,6 +445,7 @@ func (q *Queries) UpsertLateRequest(ctx context.Context, arg UpsertLateRequestPa
 		arg.CharacterID,
 		arg.Status,
 		arg.Note,
+		arg.LateUntil,
 	)
 	var i LateSignupRequest
 	err := row.Scan(
@@ -440,6 +457,7 @@ func (q *Queries) UpsertLateRequest(ctx context.Context, arg UpsertLateRequestPa
 		&i.State,
 		&i.CreatedAt,
 		&i.DecidedAt,
+		&i.LateUntil,
 	)
 	return i, err
 }

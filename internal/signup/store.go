@@ -179,13 +179,10 @@ func eventFromRow(row db.Event) Event {
 }
 
 func (s *Store) UpsertSignup(ctx context.Context, in SignupWrite) (Signup, error) {
-	params := db.UpsertSignupParams{
+	row, err := s.queries.UpsertSignup(ctx, db.UpsertSignupParams{
 		EventID: in.EventID, CharacterID: in.CharacterID, Status: in.Status, Note: in.Note,
-	}
-	if in.LateUntil != nil {
-		params.LateUntil = pgtype.Timestamptz{Time: *in.LateUntil, Valid: true}
-	}
-	row, err := s.queries.UpsertSignup(ctx, params)
+		LateUntil: timestamptzFromPtr(in.LateUntil),
+	})
 	if err != nil {
 		return Signup{}, err
 	}
@@ -228,6 +225,7 @@ func signupFromRow(row db.Signup) Signup {
 func (s *Store) UpsertLateRequest(ctx context.Context, in LateRequestWrite) (LateRequest, error) {
 	row, err := s.queries.UpsertLateRequest(ctx, db.UpsertLateRequestParams{
 		EventID: in.EventID, CharacterID: in.CharacterID, Status: in.Status, Note: in.Note,
+		LateUntil: timestamptzFromPtr(in.LateUntil),
 	})
 	if err != nil {
 		return LateRequest{}, err
@@ -259,6 +257,15 @@ func (s *Store) DecideLateRequest(ctx context.Context, id uuid.UUID, state db.Re
 	return s.queries.DecideLateRequest(ctx, db.DecideLateRequestParams{ID: id, State: state})
 }
 
+// timestamptzFromPtr maps a nil time to SQL NULL. Go's zero time is a real instant,
+// so writing it unguarded would store year 1 rather than "unset".
+func timestamptzFromPtr(t *time.Time) pgtype.Timestamptz {
+	if t == nil {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: *t, Valid: true}
+}
+
 func lateRequestFromRow(row db.LateSignupRequest) LateRequest {
 	req := LateRequest{
 		ID:          row.ID,
@@ -268,6 +275,10 @@ func lateRequestFromRow(row db.LateSignupRequest) LateRequest {
 		Note:        row.Note,
 		State:       row.State,
 		CreatedAt:   row.CreatedAt.Time,
+	}
+	if row.LateUntil.Valid {
+		t := row.LateUntil.Time
+		req.LateUntil = &t
 	}
 	if row.DecidedAt.Valid {
 		t := row.DecidedAt.Time
@@ -309,9 +320,11 @@ func (s *Store) ReplaceRaidLeadRoleIDs(ctx context.Context, discordGuildID int64
 	return nil
 }
 
-func (s *Store) ListUndeliveredNotifications(ctx context.Context, guildID *int64, limit int32) ([]StoredNotification, error) {
-	rows, err := s.queries.ListUndeliveredNotifications(ctx, db.ListUndeliveredNotificationsParams{
-		GuildID: guildID, RowLimit: limit,
+func (s *Store) ClaimNotifications(ctx context.Context, guildID *int64, claimedBefore time.Time, limit int32) ([]StoredNotification, error) {
+	rows, err := s.queries.ClaimNotifications(ctx, db.ClaimNotificationsParams{
+		GuildID:       guildID,
+		ClaimedBefore: pgtype.Timestamptz{Time: claimedBefore, Valid: true},
+		RowLimit:      limit,
 	})
 	if err != nil {
 		return nil, err
@@ -334,8 +347,17 @@ func (s *Store) ListUndeliveredNotifications(ctx context.Context, guildID *int64
 	return out, nil
 }
 
-func (s *Store) MarkNotificationDelivered(ctx context.Context, id uuid.UUID) error {
-	return s.queries.MarkNotificationDelivered(ctx, id)
+func (s *Store) MarkNotificationDelivered(ctx context.Context, id uuid.UUID, discordGuildID int64) error {
+	rows, err := s.queries.MarkNotificationDelivered(ctx, db.MarkNotificationDeliveredParams{
+		ID: id, DiscordGuildID: discordGuildID,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotificationNotFound
+	}
+	return nil
 }
 
 func (s *Store) InsertNotification(ctx context.Context, n Notification) error {

@@ -185,6 +185,40 @@ func TestListUndecidedForEventGroupsByUserNotCharacter(t *testing.T) {
 	}
 }
 
+func TestListUndecidedForEventSkipsAUserWhoAnsweredOnOneCharacter(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	event := seedEventForJobs(ctx, t, q, 70)
+	user, main := seedUserAndCharacter(ctx, t, q, 71, "Main")
+	for i, altName := range []string{"Alt1", "Alt2", "Alt3"} {
+		if _, err := q.CreateCharacter(ctx, CreateCharacterParams{
+			UserID: user.ID, Name: altName, Realm: "Area-52", Region: "us", IsMain: false,
+		}); err != nil {
+			t.Fatalf("creating alt %d: %v", i, err)
+		}
+	}
+
+	// Answered on the main, three alts untouched. Answering once answers for the
+	// person: a per-character join would still emit the three unsigned alts and nag
+	// them about an event they have already answered.
+	if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
+		EventID: event.ID, CharacterID: main.ID, Status: SignupStatusCONFIRMED,
+	}); err != nil {
+		t.Fatalf("signing up the main: %v", err)
+	}
+
+	undecided, err := q.ListUndecidedForEvent(ctx, event.ID)
+	if err != nil {
+		t.Fatalf("listing undecided: %v", err)
+	}
+	for _, id := range undecided {
+		if id == user.DiscordID {
+			t.Fatalf("undecided = %v, want %d absent: they answered on their main", undecided, user.DiscordID)
+		}
+	}
+}
+
 func TestListConfirmedWithRoleOnlyReturnsAssignedSignups(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)

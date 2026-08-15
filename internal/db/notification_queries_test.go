@@ -30,31 +30,145 @@ func TestNotificationRoundTripsAndClearsFromUndelivered(t *testing.T) {
 		t.Fatalf("inserting notification: %v", err)
 	}
 
-	undelivered, err := q.ListUndeliveredNotifications(ctx, ListUndeliveredNotificationsParams{RowLimit: 10})
+	undelivered, err := q.ClaimNotifications(ctx, claimParams(10, nil))
 	if err != nil {
-		t.Fatalf("listing undelivered: %v", err)
+		t.Fatalf("claiming: %v", err)
 	}
 	if len(undelivered) != 1 {
-		t.Fatalf("undelivered = %d, want 1", len(undelivered))
+		t.Fatalf("claimed = %d, want 1", len(undelivered))
 	}
 	if undelivered[0].DiscordID == nil || *undelivered[0].DiscordID != discordID {
 		t.Errorf("discord_id = %v, want %d", undelivered[0].DiscordID, discordID)
 	}
 
-	if err := q.MarkNotificationDelivered(ctx, undelivered[0].ID); err != nil {
+	rows, err := q.MarkNotificationDelivered(ctx, MarkNotificationDeliveredParams{
+		ID: undelivered[0].ID, DiscordGuildID: 100,
+	})
+	if err != nil {
 		t.Fatalf("marking delivered: %v", err)
 	}
+	if rows != 1 {
+		t.Fatalf("acked %d rows, want 1", rows)
+	}
 
-	after, err := q.ListUndeliveredNotifications(ctx, ListUndeliveredNotificationsParams{RowLimit: 10})
+	// Lease wide open, so only delivered_at can be keeping it out of the result.
+	after, err := q.ClaimNotifications(ctx, claimParamsAt(time.Now().Add(time.Hour), 10, nil))
 	if err != nil {
-		t.Fatalf("re-listing undelivered: %v", err)
+		t.Fatalf("re-claiming: %v", err)
 	}
 	if len(after) != 0 {
-		t.Errorf("undelivered after ack = %d, want 0", len(after))
+		t.Errorf("claimable after ack = %d, want 0", len(after))
 	}
 }
 
-func TestListUndeliveredNotificationsFiltersByGuild(t *testing.T) {
+// testClaimLease mirrors the lease signup.Outbox applies. Passing a bare time.Now()
+// instead would mean a zero-length lease, under which every claimed row is instantly
+// reclaimable and the claim proves nothing.
+const testClaimLease = 5 * time.Minute
+
+// claimParams claims unclaimed rows and any whose lease has lapsed.
+func claimParams(limit int32, guildID *int64) ClaimNotificationsParams {
+	return claimParamsAt(time.Now().Add(-testClaimLease), limit, guildID)
+}
+
+func claimParamsAt(claimedBefore time.Time, limit int32, guildID *int64) ClaimNotificationsParams {
+	return ClaimNotificationsParams{
+		ClaimedBefore: pgtype.Timestamptz{Time: claimedBefore, Valid: true},
+		GuildID:       guildID,
+		RowLimit:      limit,
+	}
+}
+
+func TestClaimNotificationsHandsARowToOnePollerOnly(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	event := seedEventForJobs(ctx, t, q, 45)
+	discordID := int64(9002)
+	if err := q.InsertNotification(ctx, InsertNotificationParams{
+		DiscordGuildID: 100, EventID: event.ID, Kind: NotificationKindREMINDER24H,
+		TargetKind: NotificationTargetUSER, DiscordID: &discordID, Payload: []byte(`{}`),
+	}); err != nil {
+		t.Fatalf("inserting notification: %v", err)
+	}
+
+	first, err := q.ClaimNotifications(ctx, claimParams(10, nil))
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("first claim = %d rows, want 1", len(first))
+	}
+
+	// The second poller's turn. The ack arrives in a later HTTP request, so nothing
+	// has been delivered yet; only the claim stops this row being sent twice.
+	second, err := q.ClaimNotifications(ctx, claimParams(10, nil))
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if len(second) != 0 {
+		t.Errorf("second claim = %d rows, want 0: a claimed row must not be sent twice", len(second))
+	}
+}
+
+func TestClaimNotificationsRedeliversAfterTheLeaseExpires(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	event := seedEventForJobs(ctx, t, q, 46)
+	discordID := int64(9003)
+	if err := q.InsertNotification(ctx, InsertNotificationParams{
+		DiscordGuildID: 100, EventID: event.ID, Kind: NotificationKindREMINDER1H,
+		TargetKind: NotificationTargetUSER, DiscordID: &discordID, Payload: []byte(`{}`),
+	}); err != nil {
+		t.Fatalf("inserting notification: %v", err)
+	}
+
+	if _, err := q.ClaimNotifications(ctx, claimParams(10, nil)); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+
+	// A bot that claimed and died. Delivery stays at-least-once: the work must come
+	// back once its lease lapses, or the reminder is silently lost.
+	again, err := q.ClaimNotifications(ctx, claimParamsAt(time.Now().Add(time.Hour), 10, nil))
+	if err != nil {
+		t.Fatalf("claim after lease: %v", err)
+	}
+	if len(again) != 1 {
+		t.Errorf("claim after lease = %d rows, want 1 redelivered", len(again))
+	}
+}
+
+func TestMarkNotificationDeliveredIgnoresAnotherGuildsRow(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	event := seedEventForJobs(ctx, t, q, 47)
+	discordID := int64(9004)
+	if err := q.InsertNotification(ctx, InsertNotificationParams{
+		DiscordGuildID: 100, EventID: event.ID, Kind: NotificationKindREMINDER24H,
+		TargetKind: NotificationTargetUSER, DiscordID: &discordID, Payload: []byte(`{}`),
+	}); err != nil {
+		t.Fatalf("inserting notification: %v", err)
+	}
+	claimed, err := q.ClaimNotifications(ctx, claimParams(10, nil))
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claiming: %v (%d rows)", err, len(claimed))
+	}
+
+	// Guild 200 acking guild 100's notification would silently suppress its reminder.
+	rows, err := q.MarkNotificationDelivered(ctx, MarkNotificationDeliveredParams{
+		ID: claimed[0].ID, DiscordGuildID: 200,
+	})
+	if err != nil {
+		t.Fatalf("marking delivered: %v", err)
+	}
+	if rows != 0 {
+		t.Errorf("acked %d rows from the wrong guild, want 0", rows)
+	}
+}
+
+func TestClaimNotificationsFiltersByGuild(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
@@ -86,11 +200,9 @@ func TestListUndeliveredNotificationsFiltersByGuild(t *testing.T) {
 	}
 
 	guild := int64(100)
-	filtered, err := q.ListUndeliveredNotifications(ctx, ListUndeliveredNotificationsParams{
-		GuildID: &guild, RowLimit: 10,
-	})
+	filtered, err := q.ClaimNotifications(ctx, claimParams(10, &guild))
 	if err != nil {
-		t.Fatalf("listing filtered notifications: %v", err)
+		t.Fatalf("claiming filtered notifications: %v", err)
 	}
 	if len(filtered) != 1 || filtered[0].DiscordGuildID != 100 {
 		t.Fatalf("filtered = %+v, want exactly the guild-100 row", filtered)

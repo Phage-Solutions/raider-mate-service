@@ -4,8 +4,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
+
+	"github.com/google/uuid"
 
 	"github.com/Phage-Solutions/raider-mate-service/internal/comp"
+	"github.com/Phage-Solutions/raider-mate-service/internal/db"
 )
 
 type compInfoResponse struct {
@@ -39,10 +43,16 @@ func compHref(eventID, name string) string {
 	return "/api/events/" + eventID + "/comps/" + name
 }
 
-func compInfoLinks(eventID string, info comp.CompInfo, isRaidLead bool) Links {
+// compLinks is the HATEOAS decision for one comp. lock is absent on a manual comp
+// and save is absent on an auto one, because each would be refused: the two modes own
+// their slots exclusively, and the absent link is the answer.
+func compLinks(eventID, name string, mode db.CompMode, isRaidLead bool) Links {
+	href := compHref(eventID, name)
 	links := Links{}
-	links.add(true, "self", compHref(eventID, info.Name), "")
-	links.add(isRaidLead, "lock", compHref(eventID, info.Name)+"/lock", "POST")
+	links.add(true, "self", href, "")
+	links.add(isRaidLead && mode != db.CompModeMANUAL, "lock", href+"/lock", "POST")
+	links.add(isRaidLead && mode == db.CompModeMANUAL, "save", href, "PUT")
+	links.add(isRaidLead, "mode", href+"/mode", "PUT")
 	return links
 }
 
@@ -69,13 +79,17 @@ func advisoriesToResponse(advisories []comp.Advisory) []advisoryResponse {
 }
 
 // listCompsHandler returns every named comp for an event.
-func listCompsHandler(reader *comp.Reader, logger *slog.Logger) http.HandlerFunc {
+func listCompsHandler(reader *comp.Reader, events eventLookup, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
 
 		eventID, err := pathUUID(r, "id")
 		if err != nil {
 			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		if _, ok := requireEventInGuild(w, r, events, logger, eventID); !ok {
 			return
 		}
 
@@ -88,14 +102,17 @@ func listCompsHandler(reader *comp.Reader, logger *slog.Logger) http.HandlerFunc
 
 		out := make([]compInfoResponse, len(list))
 		for i, info := range list {
-			out[i] = compInfoResponse{Name: info.Name, Mode: string(info.Mode), Links: compInfoLinks(eventID.String(), info, actor.IsRaidLead)}
+			out[i] = compInfoResponse{
+				Name: info.Name, Mode: string(info.Mode),
+				Links: compLinks(eventID.String(), info.Name, info.Mode, actor.IsRaidLead),
+			}
 		}
 		writeJSON(w, logger, http.StatusOK, out)
 	}
 }
 
 // getCompHandler returns one named comp's mode and slots.
-func getCompHandler(reader *comp.Reader, logger *slog.Logger) http.HandlerFunc {
+func getCompHandler(reader *comp.Reader, events eventLookup, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
 
@@ -105,6 +122,10 @@ func getCompHandler(reader *comp.Reader, logger *slog.Logger) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
+
+		if _, ok := requireEventInGuild(w, r, events, logger, eventID); !ok {
+			return
+		}
 
 		board, found, err := reader.Get(r.Context(), eventID, name)
 		if err != nil {
@@ -117,12 +138,9 @@ func getCompHandler(reader *comp.Reader, logger *slog.Logger) http.HandlerFunc {
 			return
 		}
 
-		links := Links{}
-		links.add(true, "self", compHref(eventID.String(), name), "")
-		links.add(actor.IsRaidLead, "lock", compHref(eventID.String(), name)+"/lock", "POST")
-
 		writeJSON(w, logger, http.StatusOK, boardResponse{
-			Name: board.Name, Mode: string(board.Mode), Slots: assignmentsToResponse(board.Slots), Links: links,
+			Name: board.Name, Mode: string(board.Mode), Slots: assignmentsToResponse(board.Slots),
+			Links: compLinks(eventID.String(), name, board.Mode, actor.IsRaidLead),
 		})
 	}
 }
@@ -130,7 +148,7 @@ func getCompHandler(reader *comp.Reader, logger *slog.Logger) http.HandlerFunc {
 // lockCompHandler runs the assigner and persists the result. Raid lead only. A
 // manual comp refuses the lock (ErrCompIsManual) rather than overwriting a
 // hand-built board.
-func lockCompHandler(locker *comp.Locker, logger *slog.Logger) http.HandlerFunc {
+func lockCompHandler(locker *comp.Locker, events eventLookup, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
 		if !actor.IsRaidLead {
@@ -145,6 +163,11 @@ func lockCompHandler(locker *comp.Locker, logger *slog.Logger) http.HandlerFunc 
 		}
 		name := r.PathValue("name")
 
+		// Being a raid lead somewhere is not being a raid lead here.
+		if _, ok := requireEventInGuild(w, r, events, logger, eventID); !ok {
+			return
+		}
+
 		result, err := locker.Lock(r.Context(), eventID, name)
 		if errors.Is(err, comp.ErrCompIsManual) {
 			writeError(w, logger, http.StatusConflict, "comp is manual; convert it before locking")
@@ -156,12 +179,154 @@ func lockCompHandler(locker *comp.Locker, logger *slog.Logger) http.HandlerFunc 
 			return
 		}
 
-		links := Links{}
-		links.add(true, "self", compHref(eventID.String(), name), "")
-
 		writeJSON(w, logger, http.StatusOK, boardResponse{
-			Name: name, Mode: "AUTO", Slots: assignmentsToResponse(result.Assignments),
-			Advisories: advisoriesToResponse(result.Advisories), Links: links,
+			Name: name, Mode: string(db.CompModeAUTO), Slots: assignmentsToResponse(result.Assignments),
+			Advisories: advisoriesToResponse(result.Advisories),
+			Links:      compLinks(eventID.String(), name, db.CompModeAUTO, actor.IsRaidLead),
 		})
 	}
+}
+
+type savedSlotRequest struct {
+	CharacterID string `json:"character_id"`
+	Role        string `json:"role"`
+	IsBench     bool   `json:"is_bench"`
+}
+
+type saveCompRequest struct {
+	Slots []savedSlotRequest `json:"slots"`
+}
+
+// saveCompHandler writes a hand-built board. Raid lead only. The whole board arrives
+// at once because that is what the domain persists: slot_index falls out of the
+// submitted order and there is no partial state to reconcile between two raid leads.
+//
+// Nothing here validates the board. A healer placed as a tank is written as asked;
+// design.md is explicit that an assigner overriding raid-lead judgement gets switched
+// off, and the same goes for the API in front of it.
+func saveCompHandler(manual *comp.Manual, events eventLookup, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor, _ := actorFromContext(r.Context())
+		if !actor.IsRaidLead {
+			writeError(w, logger, http.StatusForbidden, "raid lead required")
+			return
+		}
+
+		eventID, err := pathUUID(r, "id")
+		if err != nil {
+			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+		name := r.PathValue("name")
+
+		if _, ok := requireEventInGuild(w, r, events, logger, eventID); !ok {
+			return
+		}
+
+		var body saveCompRequest
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		placements := make([]comp.Placement, len(body.Slots))
+		for i, s := range body.Slots {
+			characterID, err := uuid.Parse(s.CharacterID)
+			if err != nil {
+				writeError(w, logger, http.StatusBadRequest, "slots["+strconv.Itoa(i)+"].character_id: "+err.Error())
+				return
+			}
+			role, err := parseRole(s.Role)
+			if err != nil {
+				writeError(w, logger, http.StatusBadRequest, "slots["+strconv.Itoa(i)+"].role: "+err.Error())
+				return
+			}
+			placements[i] = comp.Placement{CharacterID: characterID, Role: role, IsBench: s.IsBench}
+		}
+
+		err = manual.Save(r.Context(), eventID, name, placements)
+		switch {
+		case errors.Is(err, comp.ErrCompIsAuto):
+			writeError(w, logger, http.StatusConflict, "comp is auto; convert it before saving")
+		case errors.Is(err, comp.ErrInvalidBoard):
+			writeError(w, logger, http.StatusBadRequest, err.Error())
+		case err != nil:
+			logger.ErrorContext(r.Context(), "saving comp", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+		default:
+			writeJSON(w, logger, http.StatusOK, boardResponse{
+				Name: name, Mode: string(db.CompModeMANUAL), Slots: placementsToResponse(placements),
+				Links: compLinks(eventID.String(), name, db.CompModeMANUAL, true),
+			})
+		}
+	}
+}
+
+type setCompModeRequest struct {
+	Mode string `json:"mode"`
+}
+
+// setCompModeHandler converts a comp between raid-lead-owned and assigner-owned. The
+// slots are left alone, so converting an auto comp hands the raid lead the assigner's
+// last output as a starting point.
+func setCompModeHandler(manual *comp.Manual, events eventLookup, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor, _ := actorFromContext(r.Context())
+		if !actor.IsRaidLead {
+			writeError(w, logger, http.StatusForbidden, "raid lead required")
+			return
+		}
+
+		eventID, err := pathUUID(r, "id")
+		if err != nil {
+			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+		name := r.PathValue("name")
+
+		if _, ok := requireEventInGuild(w, r, events, logger, eventID); !ok {
+			return
+		}
+
+		var body setCompModeRequest
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+		mode, err := parseCompMode(body.Mode)
+		if err != nil {
+			writeError(w, logger, http.StatusBadRequest, "mode: "+err.Error())
+			return
+		}
+
+		if err := manual.SetMode(r.Context(), eventID, name, mode); err != nil {
+			logger.ErrorContext(r.Context(), "setting comp mode", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+			return
+		}
+
+		writeJSON(w, logger, http.StatusOK, compInfoResponse{
+			Name: name, Mode: string(mode),
+			Links: compLinks(eventID.String(), name, mode, true),
+		})
+	}
+}
+
+func placementsToResponse(placements []comp.Placement) []assignmentResponse {
+	out := make([]assignmentResponse, len(placements))
+	var seated, benched int16
+	for i, p := range placements {
+		index := seated
+		if p.IsBench {
+			index = benched
+			benched++
+		} else {
+			seated++
+		}
+		out[i] = assignmentResponse{
+			CharacterID: p.CharacterID.String(), Role: string(p.Role),
+			SlotIndex: index, IsBench: p.IsBench, Reason: comp.ManualReason,
+		}
+	}
+	return out
 }

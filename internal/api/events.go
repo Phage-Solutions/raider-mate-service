@@ -95,13 +95,8 @@ func createEventHandler(events *signup.Events, logger *slog.Logger) http.Handler
 			return
 		}
 
-		guildID, err := pathSnowflake(r, "gid")
-		if err != nil {
-			writeError(w, logger, http.StatusBadRequest, err.Error())
-			return
-		}
-		if guildID != int64(actor.GuildID) { //nolint:gosec
-			writeError(w, logger, http.StatusForbidden, "guild mismatch")
+		guildID, ok := requireGuildPath(w, r, logger, "gid")
+		if !ok {
 			return
 		}
 
@@ -115,15 +110,25 @@ func createEventHandler(events *signup.Events, logger *slog.Logger) http.Handler
 			compTemplate = []byte("{}")
 		}
 
+		eventType, err := parseEventType(body.Type)
+		if err != nil {
+			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		var difficulty *db.RaidDifficulty
 		if body.Difficulty != nil {
-			d := db.RaidDifficulty(*body.Difficulty)
+			d, err := parseRaidDifficulty(*body.Difficulty)
+			if err != nil {
+				writeError(w, logger, http.StatusBadRequest, err.Error())
+				return
+			}
 			difficulty = &d
 		}
 
 		event, err := events.Create(r.Context(), signup.CreateEventInput{
 			DiscordGuildID: guildID,
-			Type:           db.EventType(body.Type),
+			Type:           eventType,
 			Title:          body.Title,
 			StartsAt:       body.StartsAt,
 			SignupDeadline: body.SignupDeadline,
@@ -145,13 +150,8 @@ func listGuildEventsHandler(events *signup.Events, logger *slog.Logger) http.Han
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
 
-		guildID, err := pathSnowflake(r, "gid")
-		if err != nil {
-			writeError(w, logger, http.StatusBadRequest, err.Error())
-			return
-		}
-		if guildID != int64(actor.GuildID) { //nolint:gosec
-			writeError(w, logger, http.StatusForbidden, "guild mismatch")
+		guildID, ok := requireGuildPath(w, r, logger, "gid")
+		if !ok {
 			return
 		}
 
@@ -182,13 +182,8 @@ func getEventHandler(events *signup.Events, logger *slog.Logger) http.HandlerFun
 			return
 		}
 
-		event, err := events.Get(r.Context(), id)
-		if err != nil {
-			writeError(w, logger, http.StatusNotFound, "event not found")
-			return
-		}
-		if event.DiscordGuildID != int64(actor.GuildID) { //nolint:gosec
-			writeError(w, logger, http.StatusNotFound, "event not found")
+		event, ok := requireEventInGuild(w, r, events, logger, id)
+		if !ok {
 			return
 		}
 
@@ -224,9 +219,7 @@ func patchEventHandler(events *signup.Events, logger *slog.Logger) http.HandlerF
 			return
 		}
 
-		existing, err := events.Get(r.Context(), id)
-		if err != nil || existing.DiscordGuildID != int64(actor.GuildID) { //nolint:gosec
-			writeError(w, logger, http.StatusNotFound, "event not found")
+		if _, ok := requireEventInGuild(w, r, events, logger, id); !ok {
 			return
 		}
 
@@ -288,9 +281,7 @@ func deleteEventHandler(events *signup.Events, logger *slog.Logger) http.Handler
 			return
 		}
 
-		existing, err := events.Get(r.Context(), id)
-		if err != nil || existing.DiscordGuildID != int64(actor.GuildID) { //nolint:gosec
-			writeError(w, logger, http.StatusNotFound, "event not found")
+		if _, ok := requireEventInGuild(w, r, events, logger, id); !ok {
 			return
 		}
 

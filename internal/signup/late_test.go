@@ -2,7 +2,9 @@ package signup
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -79,6 +81,80 @@ func TestApproveWritesTheSignupAndMarksDecided(t *testing.T) {
 	}
 	if store.decided[req.ID] != db.RequestStateAPPROVED {
 		t.Errorf("decided state = %s, want APPROVED", store.decided[req.ID])
+	}
+}
+
+func TestApproveCarriesLateUntilThroughToTheSignup(t *testing.T) {
+	store := newFakeSignupStore()
+	until := time.Now().Add(30 * time.Minute)
+	req, err := store.UpsertLateRequest(context.Background(), LateRequestWrite{
+		EventID: uuid.New(), CharacterID: uuid.New(), Status: db.SignupStatusLATE, LateUntil: &until,
+	})
+	if err != nil {
+		t.Fatalf("seeding late request: %v", err)
+	}
+
+	if err := NewLateRequests(store).Approve(context.Background(), req.ID); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+
+	if len(store.written) != 1 {
+		t.Fatalf("wrote %d signups, want 1", len(store.written))
+	}
+	// Without it, approving "I'll be 20 minutes late" produces a LATE signup that
+	// cannot say how late, which is the only thing that makes the status actionable.
+	if store.written[0].LateUntil == nil || !store.written[0].LateUntil.Equal(until) {
+		t.Errorf("late_until = %v, want %v carried through from the request", store.written[0].LateUntil, until)
+	}
+}
+
+func TestApproveRefusesARequestAlreadyDecided(t *testing.T) {
+	store := newFakeSignupStore()
+	req, err := store.UpsertLateRequest(context.Background(), LateRequestWrite{
+		EventID: uuid.New(), CharacterID: uuid.New(), Status: db.SignupStatusCONFIRMED,
+	})
+	if err != nil {
+		t.Fatalf("seeding late request: %v", err)
+	}
+	lateRequests := NewLateRequests(store)
+	if err := lateRequests.Reject(context.Background(), req.ID); err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+
+	// A stale bot button, or a second raid lead racing the first.
+	err = lateRequests.Approve(context.Background(), req.ID)
+
+	if !errors.Is(err, ErrRequestDecided) {
+		t.Fatalf("err = %v, want ErrRequestDecided", err)
+	}
+	if len(store.written) != 0 {
+		t.Errorf("wrote %d signups, want none: a rejection must not become a signup", len(store.written))
+	}
+	if store.decided[req.ID] != db.RequestStateREJECTED {
+		t.Errorf("state = %s, want REJECTED to stand", store.decided[req.ID])
+	}
+}
+
+func TestRejectRefusesARequestAlreadyDecided(t *testing.T) {
+	store := newFakeSignupStore()
+	req, err := store.UpsertLateRequest(context.Background(), LateRequestWrite{
+		EventID: uuid.New(), CharacterID: uuid.New(), Status: db.SignupStatusCONFIRMED,
+	})
+	if err != nil {
+		t.Fatalf("seeding late request: %v", err)
+	}
+	lateRequests := NewLateRequests(store)
+	if err := lateRequests.Approve(context.Background(), req.ID); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+
+	err = lateRequests.Reject(context.Background(), req.ID)
+
+	if !errors.Is(err, ErrRequestDecided) {
+		t.Fatalf("err = %v, want ErrRequestDecided", err)
+	}
+	if store.decided[req.ID] != db.RequestStateAPPROVED {
+		t.Errorf("state = %s, want APPROVED to stand", store.decided[req.ID])
 	}
 }
 

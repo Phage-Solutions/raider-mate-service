@@ -1,0 +1,27 @@
+meta {
+  name: save manual comp
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/api/events/{{eventId}}/comps/{{compName}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "slots": [
+      { "character_id": "{{characterId}}", "role": "TANK", "is_bench": false }
+    ]
+  }
+}
+
+docs {
+  Raid lead only. The whole board is submitted at once, so slot_index falls out of
+  the submitted order. Nothing validates the composition: a healer placed as a tank
+  is written exactly as asked.
+
+  Refuses with 409 if the comp is AUTO. Convert it first with "set comp mode".
+}

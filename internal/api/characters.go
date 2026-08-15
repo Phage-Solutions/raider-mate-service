@@ -3,8 +3,10 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
+	"github.com/google/uuid"
+
 	"github.com/Phage-Solutions/raider-mate-service/internal/roster"
 )
 
@@ -22,10 +24,13 @@ type characterResponse struct {
 	Links      Links    `json:"_links"`
 }
 
-func characterToResponse(c roster.Character) characterResponse {
+// characterToResponse renders one character. canEditRoles gates the roles link:
+// putCharacterRolesHandler is self-only, so offering it on someone else's character
+// would be an affordance that 403s. The absence of the link is the answer.
+func characterToResponse(c roster.Character, canEditRoles bool) characterResponse {
 	links := Links{}
 	links.add(true, "self", "/api/characters/"+c.ID.String(), "")
-	links.add(true, "roles", "/api/characters/"+c.ID.String()+"/roles", "PUT")
+	links.add(canEditRoles, "roles", "/api/characters/"+c.ID.String()+"/roles", "PUT")
 
 	return characterResponse{
 		ID:         c.ID.String(),
@@ -57,13 +62,8 @@ func createCharacterHandler(characters *roster.Characters, logger *slog.Logger) 
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
 
-		guildID, err := pathSnowflake(r, "gid")
-		if err != nil {
-			writeError(w, logger, http.StatusBadRequest, err.Error())
-			return
-		}
-		if guildID != int64(actor.GuildID) { //nolint:gosec
-			writeError(w, logger, http.StatusForbidden, "guild mismatch")
+		guildID, ok := requireGuildPath(w, r, logger, "gid")
+		if !ok {
 			return
 		}
 
@@ -87,7 +87,8 @@ func createCharacterHandler(characters *roster.Characters, logger *slog.Logger) 
 			return
 		}
 
-		writeJSON(w, logger, http.StatusCreated, characterToResponse(character))
+		// Registered for the actor themselves, so they can always edit its roles.
+		writeJSON(w, logger, http.StatusCreated, characterToResponse(character, true))
 	}
 }
 
@@ -96,13 +97,8 @@ func listGuildCharactersHandler(characters *roster.Characters, logger *slog.Logg
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
 
-		guildID, err := pathSnowflake(r, "gid")
-		if err != nil {
-			writeError(w, logger, http.StatusBadRequest, err.Error())
-			return
-		}
-		if guildID != int64(actor.GuildID) { //nolint:gosec
-			writeError(w, logger, http.StatusForbidden, "guild mismatch")
+		guildID, ok := requireGuildPath(w, r, logger, "gid")
+		if !ok {
 			return
 		}
 
@@ -113,9 +109,22 @@ func listGuildCharactersHandler(characters *roster.Characters, logger *slog.Logg
 			return
 		}
 
+		// A guild roster is everyone's characters, so the roles link has to be decided
+		// per row rather than per response.
+		mine, err := characters.ListForUser(r.Context(), int64(actor.DiscordID), guildID) //nolint:gosec
+		if err != nil {
+			logger.ErrorContext(r.Context(), "listing actor characters", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+			return
+		}
+		owned := make(map[uuid.UUID]bool, len(mine))
+		for _, c := range mine {
+			owned[c.ID] = true
+		}
+
 		out := make([]characterResponse, len(list))
 		for i, c := range list {
-			out[i] = characterToResponse(c)
+			out[i] = characterToResponse(c, owned[c.ID])
 		}
 		writeJSON(w, logger, http.StatusOK, out)
 	}
@@ -142,9 +151,12 @@ func listUserCharactersHandler(characters *roster.Characters, logger *slog.Logge
 			return
 		}
 
+		// Every row belongs to {did}, so one comparison covers the whole list.
+		self := discordID == int64(actor.DiscordID) //nolint:gosec
+
 		out := make([]characterResponse, len(list))
 		for i, c := range list {
-			out[i] = characterToResponse(c)
+			out[i] = characterToResponse(c, self)
 		}
 		writeJSON(w, logger, http.StatusOK, out)
 	}
@@ -191,7 +203,12 @@ func putCharacterRolesHandler(characters *roster.Characters, logger *slog.Logger
 
 		roles := make([]roster.RoleChoice, len(body.Roles))
 		for i, rc := range body.Roles {
-			roles[i] = roster.RoleChoice{Role: db.RoleEnum(rc.Role), Priority: rc.Priority}
+			role, err := parseRole(rc.Role)
+			if err != nil {
+				writeError(w, logger, http.StatusBadRequest, "roles["+strconv.Itoa(i)+"]."+err.Error())
+				return
+			}
+			roles[i] = roster.RoleChoice{Role: role, Priority: rc.Priority}
 		}
 
 		if err := characters.SetRoles(r.Context(), characterID, roles); err != nil {

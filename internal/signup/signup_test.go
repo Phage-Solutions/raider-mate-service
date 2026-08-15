@@ -54,7 +54,10 @@ func (s *fakeSignupStore) ListSignupsForEvent(context.Context, uuid.UUID) ([]Sig
 
 func (s *fakeSignupStore) UpsertLateRequest(_ context.Context, in LateRequestWrite) (LateRequest, error) {
 	s.lateWritten = append(s.lateWritten, in)
-	req := LateRequest{ID: uuid.New(), EventID: in.EventID, CharacterID: in.CharacterID, Status: in.Status, Note: in.Note, State: db.RequestStatePENDING}
+	req := LateRequest{
+		ID: uuid.New(), EventID: in.EventID, CharacterID: in.CharacterID,
+		Status: in.Status, Note: in.Note, LateUntil: in.LateUntil, State: db.RequestStatePENDING,
+	}
 	s.lateReqs[req.ID] = req
 	return req, nil
 }
@@ -71,8 +74,15 @@ func (s *fakeSignupStore) ListLateRequests(context.Context, uuid.UUID) ([]LateRe
 	return reqs, nil
 }
 
+// DecideLateRequest updates the stored row too, not just the audit map: the state
+// guard in Approve/Reject reads it back, so a fake that only recorded the call would
+// make a decided request look pending forever.
 func (s *fakeSignupStore) DecideLateRequest(_ context.Context, id uuid.UUID, state db.RequestState) error {
 	s.decided[id] = state
+	if req, ok := s.lateReqs[id]; ok {
+		req.State = state
+		s.lateReqs[id] = req
+	}
 	return nil
 }
 

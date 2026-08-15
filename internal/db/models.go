@@ -522,6 +522,7 @@ type LateSignupRequest struct {
 	State       RequestState
 	CreatedAt   pgtype.Timestamptz
 	DecidedAt   pgtype.Timestamptz
+	LateUntil   pgtype.Timestamptz
 }
 
 type Notification struct {
@@ -536,6 +537,7 @@ type Notification struct {
 	Payload        []byte
 	CreatedAt      pgtype.Timestamptz
 	DeliveredAt    pgtype.Timestamptz
+	ClaimedAt      pgtype.Timestamptz
 }
 
 type ScheduledJob struct {
