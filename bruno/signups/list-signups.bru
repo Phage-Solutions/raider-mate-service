@@ -1,0 +1,11 @@
+meta {
+  name: list signups
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/events/{{eventId}}/signups
+  body: none
+  auth: none
+}

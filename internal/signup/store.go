@@ -87,6 +87,18 @@ func (s *Store) GetEvent(ctx context.Context, id uuid.UUID) (Event, error) {
 	return eventFromRow(row), nil
 }
 
+func (s *Store) ListUpcomingEvents(ctx context.Context, discordGuildID int64) ([]Event, error) {
+	rows, err := s.queries.ListUpcomingEvents(ctx, discordGuildID)
+	if err != nil {
+		return nil, err
+	}
+	events := make([]Event, len(rows))
+	for i, row := range rows {
+		events[i] = eventFromRow(row)
+	}
+	return events, nil
+}
+
 // UpdateEvent applies a partial edit and, whenever StartsAt or SignupDeadline moved,
 // cancels every PENDING job for the event and reschedules from the new times, all in
 // one transaction (design.md section 6: cancel on edit rather than validating at fire
@@ -266,6 +278,64 @@ func lateRequestFromRow(row db.LateSignupRequest) LateRequest {
 
 func (s *Store) RaidLeadRoleIDs(ctx context.Context, discordGuildID int64) ([]int64, error) {
 	return s.queries.ListRaidLeadRoles(ctx, discordGuildID)
+}
+
+// ReplaceRaidLeadRoleIDs overwrites a guild's whole mapping in one transaction: a
+// PUT that half-applies would leave a stale role granting the capability alongside
+// the caller's intended set.
+func (s *Store) ReplaceRaidLeadRoleIDs(ctx context.Context, discordGuildID int64, roleIDs []int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	q := s.queries.WithTx(tx)
+
+	if err := q.DeleteRaidLeadRoles(ctx, discordGuildID); err != nil {
+		return fmt.Errorf("clearing existing roles: %w", err)
+	}
+	for _, roleID := range roleIDs {
+		if err := q.InsertRaidLeadRole(ctx, db.InsertRaidLeadRoleParams{
+			DiscordGuildID: discordGuildID, DiscordRoleID: roleID,
+		}); err != nil {
+			return fmt.Errorf("inserting role %d: %w", roleID, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing tx: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListUndeliveredNotifications(ctx context.Context, guildID *int64, limit int32) ([]StoredNotification, error) {
+	rows, err := s.queries.ListUndeliveredNotifications(ctx, db.ListUndeliveredNotificationsParams{
+		GuildID: guildID, RowLimit: limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]StoredNotification, len(rows))
+	for i, row := range rows {
+		out[i] = StoredNotification{
+			ID:             row.ID,
+			DiscordGuildID: row.DiscordGuildID,
+			EventID:        row.EventID,
+			Kind:           row.Kind,
+			TargetKind:     row.TargetKind,
+			DiscordID:      row.DiscordID,
+			RoleIDs:        row.RoleIds,
+			ChannelID:      row.ChannelID,
+			Payload:        row.Payload,
+			CreatedAt:      row.CreatedAt.Time,
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) MarkNotificationDelivered(ctx context.Context, id uuid.UUID) error {
+	return s.queries.MarkNotificationDelivered(ctx, id)
 }
 
 func (s *Store) InsertNotification(ctx context.Context, n Notification) error {

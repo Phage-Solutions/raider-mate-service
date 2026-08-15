@@ -1,0 +1,11 @@
+meta {
+  name: list user characters
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/users/{{discordId}}/characters
+  body: none
+  auth: none
+}

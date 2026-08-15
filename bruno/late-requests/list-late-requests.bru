@@ -1,0 +1,11 @@
+meta {
+  name: list late requests
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/events/{{eventId}}/late-requests
+  body: none
+  auth: none
+}

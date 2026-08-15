@@ -93,6 +93,27 @@ func (q *Queries) GetCharacterInGuild(ctx context.Context, arg GetCharacterInGui
 	return i, err
 }
 
+const getCharacterOwner = `-- name: GetCharacterOwner :one
+SELECT u.discord_id FROM characters c
+JOIN users u ON u.id = c.user_id
+WHERE c.id = $1 AND u.discord_guild_id = $2
+`
+
+type GetCharacterOwnerParams struct {
+	ID             uuid.UUID
+	DiscordGuildID int64
+}
+
+// A signup write is "self, or raid lead": self means the caller's discord id owns
+// the character, which the signup and late-request handlers cannot decide without
+// this.
+func (q *Queries) GetCharacterOwner(ctx context.Context, arg GetCharacterOwnerParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getCharacterOwner, arg.ID, arg.DiscordGuildID)
+	var discord_id int64
+	err := row.Scan(&discord_id)
+	return discord_id, err
+}
+
 const getUserByDiscord = `-- name: GetUserByDiscord :one
 SELECT id, discord_id, discord_guild_id, created_at FROM users
 WHERE discord_id = $1 AND discord_guild_id = $2

@@ -1,0 +1,17 @@
+meta {
+  name: put signup
+  type: http
+  seq: 1
+}
+
+put {
+  url: {{baseUrl}}/api/events/{{eventId}}/signups/{{characterId}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "status": "CONFIRMED"
+  }
+}

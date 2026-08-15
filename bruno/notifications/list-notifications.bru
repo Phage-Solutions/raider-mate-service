@@ -1,0 +1,15 @@
+meta {
+  name: list undelivered notifications
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/notifications?guild_id={{guildId}}
+  body: none
+  auth: none
+}
+
+params:query {
+  guild_id: {{guildId}}
+}

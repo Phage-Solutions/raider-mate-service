@@ -1,0 +1,20 @@
+meta {
+  name: put character roles
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/api/characters/{{characterId}}/roles
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "roles": [
+      { "role": "TANK", "priority": 1 },
+      { "role": "MDPS", "priority": 2 }
+    ]
+  }
+}

@@ -100,17 +100,23 @@ Responses carry links describing available transitions:
   "id": "0192f3c8-...",
   "status": "CONFIRMED",
   "_links": {
-    "self":     { "href": "/api/events/{id}/signups/{sid}" },
-    "withdraw": { "href": "/api/events/{id}/signups/{sid}", "method": "DELETE" }
+    "self":     { "href": "/api/events/{id}/signups/{cid}", "method": "PUT" },
+    "withdraw": { "href": "/api/events/{id}/signups/{cid}", "method": "DELETE" }
   }
 }
 ```
 
-Links are computed from state and permissions, not hardcoded per endpoint. A player
-sees `withdraw`. A raid lead additionally sees `assign`. Bench membership is not a
-signup link: it lives on `comp_slots.is_bench`, decided by the assigner or a raid
-lead's manual comp save, never by a direct action on the signup. The absence of a
-link is meaningful: the action is unavailable to this caller right now.
+Addressed by character id, not a signup id: `UNIQUE (event_id, character_id)` makes
+the character the natural key and makes `PUT` idempotent, which the bot needs since
+it does not know a signup's id before the first write.
+
+Links are computed from state and permissions, not hardcoded per endpoint. Both links
+are visible to the character's owner and to a raid lead, and to nobody else; the
+absence of a link is meaningful, the action is unavailable to this caller right now.
+Bench membership is not a signup link: it lives on `comp_slots.is_bench`, decided by
+the assigner or a raid lead's manual comp save, never by a direct action on the
+signup. Assignment (`assigned_role`) works the same way: it is a side effect of a
+comp lock, not a link on the signup itself.
 
 Use a single link-building helper. This is the one place where up-front abstraction is
 justified, because otherwise link logic scatters across every handler.

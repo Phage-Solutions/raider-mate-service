@@ -53,6 +53,7 @@ type UpdateEventInput struct {
 type eventStore interface {
 	CreateEvent(ctx context.Context, in CreateEventInput) (Event, error)
 	GetEvent(ctx context.Context, id uuid.UUID) (Event, error)
+	ListUpcomingEvents(ctx context.Context, discordGuildID int64) ([]Event, error)
 	UpdateEvent(ctx context.Context, in UpdateEventInput) (Event, error)
 	DeleteEvent(ctx context.Context, id uuid.UUID) error
 }
@@ -86,6 +87,15 @@ func (e *Events) Get(ctx context.Context, id uuid.UUID) (Event, error) {
 		return Event{}, fmt.Errorf("loading event: %w", err)
 	}
 	return event, nil
+}
+
+// ListUpcoming returns a guild's events that have not started yet, soonest first.
+func (e *Events) ListUpcoming(ctx context.Context, discordGuildID int64) ([]Event, error) {
+	events, err := e.store.ListUpcomingEvents(ctx, discordGuildID)
+	if err != nil {
+		return nil, fmt.Errorf("listing events: %w", err)
+	}
+	return events, nil
 }
 
 // Update applies a partial edit. Reschedule-on-edit (design.md section 6) happens

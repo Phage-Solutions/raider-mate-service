@@ -1,0 +1,11 @@
+meta {
+  name: approve late request
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/events/{{eventId}}/late-requests/{{requestId}}/approve
+  body: none
+  auth: none
+}

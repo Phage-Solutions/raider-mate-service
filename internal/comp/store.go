@@ -116,6 +116,32 @@ func (s *Store) CompMode(ctx context.Context, eventID uuid.UUID, compName string
 	return comp.Mode, true, nil
 }
 
+func (s *Store) ListComps(ctx context.Context, eventID uuid.UUID) ([]CompInfo, error) {
+	rows, err := s.queries.ListComps(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CompInfo, len(rows))
+	for i, r := range rows {
+		out[i] = CompInfo{Name: r.Name, Mode: r.Mode}
+	}
+	return out, nil
+}
+
+func (s *Store) ListCompSlots(ctx context.Context, eventID uuid.UUID, compName string) ([]Assignment, error) {
+	rows, err := s.queries.ListCompSlots(ctx, db.ListCompSlotsParams{EventID: eventID, CompName: compName})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Assignment, len(rows))
+	for i, r := range rows {
+		out[i] = Assignment{
+			CharacterID: r.CharacterID, Role: r.Role, SlotIndex: r.SlotIndex, IsBench: r.IsBench, Reason: r.Reason,
+		}
+	}
+	return out, nil
+}
+
 func (s *Store) SetCompMode(ctx context.Context, eventID uuid.UUID, compName string, mode db.CompMode) error {
 	return s.queries.SetCompMode(ctx, db.SetCompModeParams{
 		EventID: eventID, Name: compName, Mode: mode,

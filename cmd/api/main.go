@@ -44,7 +44,7 @@ func run() error {
 	// client that dribbles headers holds a connection open forever.
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           api.NewRouter(pool, logger),
+		Handler:           api.NewRouter(pool, cfg.ServiceAPIKey, logger),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

@@ -1,0 +1,20 @@
+meta {
+  name: create character
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/characters
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "name": "Danthrax",
+    "realm": "Area-52",
+    "region": "us",
+    "is_main": true
+  }
+}

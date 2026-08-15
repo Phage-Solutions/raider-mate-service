@@ -1,0 +1,17 @@
+meta {
+  name: put raid lead roles
+  type: http
+  seq: 2
+}
+
+put {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/raid-lead-roles
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "role_ids": ["{{actorRoles}}"]
+  }
+}

@@ -1,0 +1,11 @@
+meta {
+  name: get comp
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/events/{{eventId}}/comps/{{compName}}
+  body: none
+  auth: none
+}

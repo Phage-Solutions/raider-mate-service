@@ -1,0 +1,11 @@
+meta {
+  name: lock comp
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/events/{{eventId}}/comps/{{compName}}/lock
+  body: none
+  auth: none
+}

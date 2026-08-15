@@ -126,3 +126,146 @@ func numericToFloat64(n pgtype.Numeric) (float64, error) {
 	}
 	return f.Float64, nil
 }
+
+func (s *Store) UpsertUser(ctx context.Context, discordID, discordGuildID int64) (uuid.UUID, error) {
+	user, err := s.queries.UpsertUser(ctx, db.UpsertUserParams{DiscordID: discordID, DiscordGuildID: discordGuildID})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return user.ID, nil
+}
+
+func (s *Store) CreateCharacter(ctx context.Context, userID uuid.UUID, in RegisterInput) (Character, error) {
+	row, err := s.queries.CreateCharacter(ctx, db.CreateCharacterParams{
+		UserID: userID, Name: in.Name, Realm: in.Realm, Region: in.Region, IsMain: in.IsMain,
+	})
+	if err != nil {
+		return Character{}, err
+	}
+	return characterFromRow(row)
+}
+
+func (s *Store) GetCharacterInGuild(ctx context.Context, characterID uuid.UUID, discordGuildID int64) (Character, error) {
+	row, err := s.queries.GetCharacterInGuild(ctx, db.GetCharacterInGuildParams{
+		ID: characterID, DiscordGuildID: discordGuildID,
+	})
+	if err != nil {
+		return Character{}, err
+	}
+	return characterFromRow(row)
+}
+
+func (s *Store) GetCharacterOwner(ctx context.Context, characterID uuid.UUID, discordGuildID int64) (int64, error) {
+	return s.queries.GetCharacterOwner(ctx, db.GetCharacterOwnerParams{
+		ID: characterID, DiscordGuildID: discordGuildID,
+	})
+}
+
+func (s *Store) ListCharactersInGuild(ctx context.Context, discordGuildID int64) ([]Character, error) {
+	rows, err := s.queries.ListCharactersInGuild(ctx, discordGuildID)
+	if err != nil {
+		return nil, err
+	}
+	return charactersFromRows(rows)
+}
+
+func (s *Store) ListCharactersByDiscord(ctx context.Context, discordID, discordGuildID int64) ([]Character, error) {
+	rows, err := s.queries.ListCharactersByDiscord(ctx, db.ListCharactersByDiscordParams{
+		DiscordID: discordID, DiscordGuildID: discordGuildID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return charactersFromRows(rows)
+}
+
+// ReplaceCharacterRoles clears and rewrites the whole role menu in one transaction,
+// matching the ephemeral select's whole-set submit.
+func (s *Store) ReplaceCharacterRoles(ctx context.Context, characterID uuid.UUID, roles []RoleChoice) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	q := s.queries.WithTx(tx)
+
+	if err := q.DeleteCharacterRoles(ctx, characterID); err != nil {
+		return fmt.Errorf("clearing existing roles: %w", err)
+	}
+	for _, r := range roles {
+		if err := q.SetCharacterRole(ctx, db.SetCharacterRoleParams{
+			CharacterID: characterID, Role: r.Role, Priority: r.Priority,
+		}); err != nil {
+			return fmt.Errorf("setting role %s: %w", r.Role, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing tx: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListCharacterRoles(ctx context.Context, characterID uuid.UUID) ([]RoleChoice, error) {
+	rows, err := s.queries.ListCharacterRoles(ctx, characterID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RoleChoice, len(rows))
+	for i, r := range rows {
+		out[i] = RoleChoice{Role: r.Role, Priority: r.Priority}
+	}
+	return out, nil
+}
+
+func characterFromRow(row db.Character) (Character, error) {
+	ilvl, err := nullableFloat64(row.Ilvl)
+	if err != nil {
+		return Character{}, fmt.Errorf("converting ilvl: %w", err)
+	}
+	mplusScore, err := nullableFloat64(row.MplusScore)
+	if err != nil {
+		return Character{}, fmt.Errorf("converting mplus_score: %w", err)
+	}
+
+	return Character{
+		ID:         row.ID,
+		UserID:     row.UserID,
+		Name:       row.Name,
+		Realm:      row.Realm,
+		Region:     row.Region,
+		Class:      row.Class,
+		Spec:       row.Spec,
+		Ilvl:       ilvl,
+		MplusScore: mplusScore,
+		IsMain:     row.IsMain,
+		Synced:     row.LastSynced.Valid,
+	}, nil
+}
+
+func charactersFromRows(rows []db.Character) ([]Character, error) {
+	out := make([]Character, len(rows))
+	for i, row := range rows {
+		c, err := characterFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = c
+	}
+	return out, nil
+}
+
+// nullableFloat64 converts a possibly-NULL numeric column. NULL is a different fact
+// than zero here (no ilvl on file versus a genuine 0), so it stays nil rather than
+// collapsing to 0.
+func nullableFloat64(n pgtype.Numeric) (*float64, error) {
+	if !n.Valid {
+		return nil, nil
+	}
+	f, err := numericToFloat64(n)
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
+}

@@ -1,0 +1,11 @@
+meta {
+  name: mark notification delivered
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/notifications/{{notificationId}}/delivered
+  body: none
+  auth: none
+}

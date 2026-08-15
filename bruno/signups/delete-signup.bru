@@ -1,0 +1,11 @@
+meta {
+  name: delete signup
+  type: http
+  seq: 2
+}
+
+delete {
+  url: {{baseUrl}}/api/events/{{eventId}}/signups/{{characterId}}
+  body: none
+  auth: none
+}

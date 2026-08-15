@@ -1,0 +1,22 @@
+meta {
+  name: create event
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/events
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "type": "RAID",
+    "title": "Prog Night",
+    "starts_at": "2026-01-01T20:00:00Z",
+    "signup_deadline": "2026-01-01T19:00:00Z",
+    "comp_template": {},
+    "difficulty": "HEROIC"
+  }
+}

@@ -1,0 +1,11 @@
+meta {
+  name: delete event
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{baseUrl}}/api/events/{{eventId}}
+  body: none
+  auth: none
+}

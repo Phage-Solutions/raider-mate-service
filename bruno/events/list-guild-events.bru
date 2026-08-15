@@ -1,0 +1,11 @@
+meta {
+  name: list guild events
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/events
+  body: none
+  auth: none
+}

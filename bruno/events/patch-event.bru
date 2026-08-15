@@ -1,0 +1,18 @@
+meta {
+  name: patch event
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/api/events/{{eventId}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "message_id": "111111111111111111",
+    "channel_id": "222222222222222222"
+  }
+}

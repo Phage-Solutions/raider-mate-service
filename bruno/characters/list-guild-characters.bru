@@ -1,0 +1,11 @@
+meta {
+  name: list guild characters
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/characters
+  body: none
+  auth: none
+}

@@ -1,0 +1,11 @@
+meta {
+  name: get raid lead roles
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/raid-lead-roles
+  body: none
+  auth: none
+}

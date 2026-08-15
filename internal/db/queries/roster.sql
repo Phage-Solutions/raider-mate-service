@@ -18,6 +18,14 @@ SELECT c.* FROM characters c
 JOIN users u ON u.id = c.user_id
 WHERE c.id = $1 AND u.discord_guild_id = $2;
 
+-- name: GetCharacterOwner :one
+-- A signup write is "self, or raid lead": self means the caller's discord id owns
+-- the character, which the signup and late-request handlers cannot decide without
+-- this.
+SELECT u.discord_id FROM characters c
+JOIN users u ON u.id = c.user_id
+WHERE c.id = $1 AND u.discord_guild_id = $2;
+
 -- name: ListCharactersByUser :many
 SELECT * FROM characters
 WHERE user_id = $1
