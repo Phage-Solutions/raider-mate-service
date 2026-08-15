@@ -12,6 +12,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countCompSlotsForEvent = `-- name: CountCompSlotsForEvent :one
+SELECT count(*) FROM comp_slots WHERE event_id = $1
+`
+
+func (q *Queries) CountCompSlotsForEvent(ctx context.Context, eventID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countCompSlotsForEvent, eventID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createEvent = `-- name: CreateEvent :one
 INSERT INTO events (discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -61,6 +72,46 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (Event
 	return i, err
 }
 
+const decideLateRequest = `-- name: DecideLateRequest :exec
+UPDATE late_signup_requests SET state = $2, decided_at = now()
+WHERE id = $1
+`
+
+type DecideLateRequestParams struct {
+	ID    uuid.UUID
+	State RequestState
+}
+
+func (q *Queries) DecideLateRequest(ctx context.Context, arg DecideLateRequestParams) error {
+	_, err := q.db.Exec(ctx, decideLateRequest, arg.ID, arg.State)
+	return err
+}
+
+const deleteEvent = `-- name: DeleteEvent :exec
+DELETE FROM events
+WHERE id = $1
+`
+
+func (q *Queries) DeleteEvent(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteEvent, id)
+	return err
+}
+
+const deleteSignup = `-- name: DeleteSignup :exec
+DELETE FROM signups
+WHERE event_id = $1 AND character_id = $2
+`
+
+type DeleteSignupParams struct {
+	EventID     uuid.UUID
+	CharacterID uuid.UUID
+}
+
+func (q *Queries) DeleteSignup(ctx context.Context, arg DeleteSignupParams) error {
+	_, err := q.db.Exec(ctx, deleteSignup, arg.EventID, arg.CharacterID)
+	return err
+}
+
 const getEvent = `-- name: GetEvent :one
 SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty FROM events
 WHERE id = $1
@@ -82,6 +133,77 @@ func (q *Queries) GetEvent(ctx context.Context, id uuid.UUID) (Event, error) {
 		&i.Difficulty,
 	)
 	return i, err
+}
+
+const listConfirmedWithRole = `-- name: ListConfirmedWithRole :many
+SELECT u.discord_id, s.assigned_role
+FROM signups s
+JOIN characters c ON c.id = s.character_id
+JOIN users u ON u.id = c.user_id
+WHERE s.event_id = $1 AND s.assigned_role IS NOT NULL
+`
+
+type ListConfirmedWithRoleRow struct {
+	DiscordID    int64
+	AssignedRole *RoleEnum
+}
+
+// assigned_role IS NOT NULL rather than status = 'CONFIRMED': the assignment pool is
+// CONFIRMED and LATE both (design.md section 5), and REMINDER_1H is for whoever
+// actually holds a seat, not for whoever merely confirmed.
+func (q *Queries) ListConfirmedWithRole(ctx context.Context, eventID uuid.UUID) ([]ListConfirmedWithRoleRow, error) {
+	rows, err := q.db.Query(ctx, listConfirmedWithRole, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListConfirmedWithRoleRow
+	for rows.Next() {
+		var i ListConfirmedWithRoleRow
+		if err := rows.Scan(&i.DiscordID, &i.AssignedRole); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLateRequests = `-- name: ListLateRequests :many
+SELECT id, event_id, character_id, status, note, state, created_at, decided_at FROM late_signup_requests
+WHERE event_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListLateRequests(ctx context.Context, eventID uuid.UUID) ([]LateSignupRequest, error) {
+	rows, err := q.db.Query(ctx, listLateRequests, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LateSignupRequest
+	for rows.Next() {
+		var i LateSignupRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.CharacterID,
+			&i.Status,
+			&i.Note,
+			&i.State,
+			&i.CreatedAt,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listSignupsForEvent = `-- name: ListSignupsForEvent :many
@@ -113,6 +235,38 @@ func (q *Queries) ListSignupsForEvent(ctx context.Context, eventID uuid.UUID) ([
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUndecidedForEvent = `-- name: ListUndecidedForEvent :many
+SELECT DISTINCT u.discord_id
+FROM characters c
+JOIN users u ON u.id = c.user_id
+JOIN events e ON e.discord_guild_id = u.discord_guild_id
+LEFT JOIN signups s ON s.event_id = e.id AND s.character_id = c.id
+WHERE e.id = $1 AND s.id IS NULL
+ORDER BY u.discord_id
+`
+
+// Grouped by discord_id, not by character: a raider with four alts and no signup is
+// one person who has not answered, and four DMs would be a bug.
+func (q *Queries) ListUndecidedForEvent(ctx context.Context, id uuid.UUID) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listUndecidedForEvent, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var discord_id int64
+		if err := rows.Scan(&discord_id); err != nil {
+			return nil, err
+		}
+		items = append(items, discord_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -172,19 +326,111 @@ func (q *Queries) SetEventDifficulty(ctx context.Context, arg SetEventDifficulty
 	return err
 }
 
-const upsertSignup = `-- name: UpsertSignup :one
-INSERT INTO signups (event_id, character_id, status, note)
+const updateEvent = `-- name: UpdateEvent :one
+UPDATE events SET
+    title = COALESCE($1, title),
+    starts_at = COALESCE($2, starts_at),
+    signup_deadline = COALESCE($3, signup_deadline),
+    comp_template = COALESCE($4, comp_template),
+    difficulty = COALESCE($5, difficulty),
+    message_id = COALESCE($6, message_id),
+    channel_id = COALESCE($7, channel_id)
+WHERE id = $8
+RETURNING id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty
+`
+
+type UpdateEventParams struct {
+	Title          *string
+	StartsAt       pgtype.Timestamptz
+	SignupDeadline pgtype.Timestamptz
+	CompTemplate   []byte
+	Difficulty     *RaidDifficulty
+	MessageID      *int64
+	ChannelID      *int64
+	ID             uuid.UUID
+}
+
+// Partial update: a field left NULL keeps its stored value, same COALESCE pattern as
+// UpdateCharacterFromSync. Covers message_id/channel_id (learned only after the bot
+// posts) and the schedule fields a PATCH reschedules jobs from.
+func (q *Queries) UpdateEvent(ctx context.Context, arg UpdateEventParams) (Event, error) {
+	row := q.db.QueryRow(ctx, updateEvent,
+		arg.Title,
+		arg.StartsAt,
+		arg.SignupDeadline,
+		arg.CompTemplate,
+		arg.Difficulty,
+		arg.MessageID,
+		arg.ChannelID,
+		arg.ID,
+	)
+	var i Event
+	err := row.Scan(
+		&i.ID,
+		&i.DiscordGuildID,
+		&i.Type,
+		&i.Title,
+		&i.StartsAt,
+		&i.SignupDeadline,
+		&i.CompTemplate,
+		&i.MessageID,
+		&i.ChannelID,
+		&i.Difficulty,
+	)
+	return i, err
+}
+
+const upsertLateRequest = `-- name: UpsertLateRequest :one
+INSERT INTO late_signup_requests (event_id, character_id, status, note)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (event_id, character_id) DO UPDATE SET
     status = excluded.status,
     note = excluded.note,
+    state = 'PENDING',
+    decided_at = NULL
+RETURNING id, event_id, character_id, status, note, state, created_at, decided_at
+`
+
+type UpsertLateRequestParams struct {
+	EventID     uuid.UUID
+	CharacterID uuid.UUID
+	Status      SignupStatus
+	Note        *string
+}
+
+// A re-request resets state to PENDING and clears any prior decision, since the
+// unique constraint makes this an upsert rather than a pile of rows.
+func (q *Queries) UpsertLateRequest(ctx context.Context, arg UpsertLateRequestParams) (LateSignupRequest, error) {
+	row := q.db.QueryRow(ctx, upsertLateRequest,
+		arg.EventID,
+		arg.CharacterID,
+		arg.Status,
+		arg.Note,
+	)
+	var i LateSignupRequest
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.CharacterID,
+		&i.Status,
+		&i.Note,
+		&i.State,
+		&i.CreatedAt,
+		&i.DecidedAt,
+	)
+	return i, err
+}
+
+const upsertSignup = `-- name: UpsertSignup :one
+INSERT INTO signups (event_id, character_id, status, note, late_until)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (event_id, character_id) DO UPDATE SET
+    status = excluded.status,
+    note = excluded.note,
+    late_until = excluded.late_until,
     assigned_role = CASE
         WHEN signups.status IS DISTINCT FROM excluded.status THEN NULL
         ELSE signups.assigned_role
-    END,
-    late_until = CASE
-        WHEN signups.status IS DISTINCT FROM excluded.status THEN NULL
-        ELSE signups.late_until
     END
 RETURNING id, event_id, character_id, status, assigned_role, late_until, note, created_at
 `
@@ -194,8 +440,11 @@ type UpsertSignupParams struct {
 	CharacterID uuid.UUID
 	Status      SignupStatus
 	Note        *string
+	LateUntil   pgtype.Timestamptz
 }
 
+// late_until is a plain write-through field, same as note: internal/signup owns the
+// rule that it is only meaningful alongside status = LATE and nils it otherwise.
 // A status change invalidates whatever the comp lock decided, so the assignment is
 // dropped. Editing only the note leaves an existing assignment alone.
 func (q *Queries) UpsertSignup(ctx context.Context, arg UpsertSignupParams) (Signup, error) {
@@ -204,6 +453,7 @@ func (q *Queries) UpsertSignup(ctx context.Context, arg UpsertSignupParams) (Sig
 		arg.CharacterID,
 		arg.Status,
 		arg.Note,
+		arg.LateUntil,
 	)
 	var i Signup
 	err := row.Scan(

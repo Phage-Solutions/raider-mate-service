@@ -276,6 +276,46 @@ func (q *Queries) ListCharactersDueForSync(ctx context.Context, arg ListCharacte
 	return items, nil
 }
 
+const listCharactersInGuild = `-- name: ListCharactersInGuild :many
+SELECT c.id, c.user_id, c.name, c.realm, c.class, c.spec, c.ilvl, c.mplus_score, c.last_synced, c.is_main, c.region, c.sync_attempted_at FROM characters c
+JOIN users u ON u.id = c.user_id
+WHERE u.discord_guild_id = $1
+ORDER BY c.name
+`
+
+func (q *Queries) ListCharactersInGuild(ctx context.Context, discordGuildID int64) ([]Character, error) {
+	rows, err := q.db.Query(ctx, listCharactersInGuild, discordGuildID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Character
+	for rows.Next() {
+		var i Character
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.Realm,
+			&i.Class,
+			&i.Spec,
+			&i.Ilvl,
+			&i.MplusScore,
+			&i.LastSynced,
+			&i.IsMain,
+			&i.Region,
+			&i.SyncAttemptedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markCharacterSyncAttempted = `-- name: MarkCharacterSyncAttempted :exec
 UPDATE characters SET sync_attempted_at = now()
 WHERE id = $1

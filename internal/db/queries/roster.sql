@@ -44,6 +44,12 @@ WHERE character_id = $1
 -- Nothing stops two roles sharing a priority; role keeps the menu order stable.
 ORDER BY priority, role;
 
+-- name: ListCharactersInGuild :many
+SELECT c.* FROM characters c
+JOIN users u ON u.id = c.user_id
+WHERE u.discord_guild_id = $1
+ORDER BY c.name;
+
 -- name: ListCharactersDueForSync :many
 -- Oldest-attempted first so a backlog drains fairly instead of starving whoever is
 -- always at the bottom of an ID-ordered scan. Ordering by attempt rather than by

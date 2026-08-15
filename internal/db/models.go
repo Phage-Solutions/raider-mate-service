@@ -184,6 +184,93 @@ func (ns NullJobStatus) Value() (driver.Value, error) {
 	return string(ns.JobStatus), nil
 }
 
+type NotificationKind string
+
+const (
+	NotificationKindREMINDER24H      NotificationKind = "REMINDER_24H"
+	NotificationKindREMINDER1H       NotificationKind = "REMINDER_1H"
+	NotificationKindSIGNUPDEADLINE   NotificationKind = "SIGNUP_DEADLINE"
+	NotificationKindCOMPNAG          NotificationKind = "COMP_NAG"
+	NotificationKindLATEREQUESTFILED NotificationKind = "LATE_REQUEST_FILED"
+)
+
+func (e *NotificationKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = NotificationKind(s)
+	case string:
+		*e = NotificationKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for NotificationKind: %T", src)
+	}
+	return nil
+}
+
+type NullNotificationKind struct {
+	NotificationKind NotificationKind
+	Valid            bool // Valid is true if NotificationKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullNotificationKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.NotificationKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.NotificationKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullNotificationKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.NotificationKind), nil
+}
+
+type NotificationTarget string
+
+const (
+	NotificationTargetUSER NotificationTarget = "USER"
+	NotificationTargetROLE NotificationTarget = "ROLE"
+)
+
+func (e *NotificationTarget) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = NotificationTarget(s)
+	case string:
+		*e = NotificationTarget(s)
+	default:
+		return fmt.Errorf("unsupported scan type for NotificationTarget: %T", src)
+	}
+	return nil
+}
+
+type NullNotificationTarget struct {
+	NotificationTarget NotificationTarget
+	Valid              bool // Valid is true if NotificationTarget is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullNotificationTarget) Scan(value interface{}) error {
+	if value == nil {
+		ns.NotificationTarget, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.NotificationTarget.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullNotificationTarget) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.NotificationTarget), nil
+}
+
 type RaidDifficulty string
 
 const (
@@ -225,6 +312,49 @@ func (ns NullRaidDifficulty) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.RaidDifficulty), nil
+}
+
+type RequestState string
+
+const (
+	RequestStatePENDING  RequestState = "PENDING"
+	RequestStateAPPROVED RequestState = "APPROVED"
+	RequestStateREJECTED RequestState = "REJECTED"
+)
+
+func (e *RequestState) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RequestState(s)
+	case string:
+		*e = RequestState(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RequestState: %T", src)
+	}
+	return nil
+}
+
+type NullRequestState struct {
+	RequestState RequestState
+	Valid        bool // Valid is true if RequestState is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRequestState) Scan(value interface{}) error {
+	if value == nil {
+		ns.RequestState, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RequestState.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRequestState) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RequestState), nil
 }
 
 type RoleEnum string
@@ -376,6 +506,36 @@ type Event struct {
 	MessageID      *int64
 	ChannelID      *int64
 	Difficulty     *RaidDifficulty
+}
+
+type GuildRaidLeadRole struct {
+	DiscordGuildID int64
+	DiscordRoleID  int64
+}
+
+type LateSignupRequest struct {
+	ID          uuid.UUID
+	EventID     uuid.UUID
+	CharacterID uuid.UUID
+	Status      SignupStatus
+	Note        *string
+	State       RequestState
+	CreatedAt   pgtype.Timestamptz
+	DecidedAt   pgtype.Timestamptz
+}
+
+type Notification struct {
+	ID             uuid.UUID
+	DiscordGuildID int64
+	EventID        uuid.UUID
+	Kind           NotificationKind
+	TargetKind     NotificationTarget
+	DiscordID      *int64
+	RoleIds        []int64
+	ChannelID      *int64
+	Payload        []byte
+	CreatedAt      pgtype.Timestamptz
+	DeliveredAt    pgtype.Timestamptz
 }
 
 type ScheduledJob struct {
