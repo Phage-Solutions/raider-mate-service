@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -81,6 +82,14 @@ func (f *fakeCharacterStore) ReplaceCharacterRoles(context.Context, uuid.UUID, [
 
 func (f *fakeCharacterStore) ListCharacterRoles(context.Context, uuid.UUID) ([]roster.RoleChoice, error) {
 	return f.roles, nil
+}
+
+func (f *fakeCharacterStore) ListRolesForCharacters(_ context.Context, ids []uuid.UUID) (map[uuid.UUID][]roster.RoleChoice, error) {
+	out := make(map[uuid.UUID][]roster.RoleChoice, len(ids))
+	for _, id := range ids {
+		out[id] = f.roles
+	}
+	return out, nil
 }
 
 // newCharacterFixture wires a Characters over a fake holding one character owned by
@@ -258,8 +267,45 @@ func TestCharacterLinksSeparateRoleEditingFromRosterHygiene(t *testing.T) {
 	}
 }
 
+func TestCharacterSummaryCarriesTheRoleMenuInPriorityOrder(t *testing.T) {
+	id := uuid.New()
+	byID := characterSummaries(
+		[]roster.Character{{ID: id, Name: "Danthrax"}},
+		map[uuid.UUID][]roster.RoleChoice{id: {
+			{Role: db.RoleEnumTANK, Priority: 1},
+			{Role: db.RoleEnumMDPS, Priority: 2},
+		}},
+	)
+
+	got := byID[id].Roles
+	want := []roleChoiceResponse{{Role: "TANK", Priority: 1}, {Role: "MDPS", Priority: 2}}
+	if len(got) != len(want) {
+		t.Fatalf("roles = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("roles[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// A raider who registered no roles must serialise as [], not null: the bot ranges over
+// this to draw the flex marker and would have to special-case a nil.
+func TestCharacterSummaryWithNoRoleMenuSerialisesAsAnEmptyArray(t *testing.T) {
+	id := uuid.New()
+	byID := characterSummaries([]roster.Character{{ID: id, Name: "Danthrax"}}, nil)
+
+	encoded, err := json.Marshal(byID[id])
+	if err != nil {
+		t.Fatalf("marshalling summary: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"roles":[]`) {
+		t.Errorf("summary = %s, want roles to be an empty array", encoded)
+	}
+}
+
 func TestLookupCharacterOmitsAnUnknownID(t *testing.T) {
-	byID := characterSummaries([]roster.Character{{ID: uuid.New(), Name: "Thrall"}})
+	byID := characterSummaries([]roster.Character{{ID: uuid.New(), Name: "Thrall"}}, nil)
 
 	if got := lookupCharacter(byID, uuid.New()); got != nil {
 		t.Errorf("summary = %v, want nil rather than an invented name", got)

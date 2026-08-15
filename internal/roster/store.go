@@ -239,6 +239,23 @@ func (s *Store) ListCharacterRoles(ctx context.Context, characterID uuid.UUID) (
 	return out, nil
 }
 
+// ListRolesForCharacters reads several role menus at once, keyed by character id.
+// Rendering a signup list or a comp board needs every raider's menu, and one query
+// per raider would be twenty-five round trips to draw one embed.
+func (s *Store) ListRolesForCharacters(ctx context.Context, characterIDs []uuid.UUID) (map[uuid.UUID][]RoleChoice, error) {
+	rows, err := s.queries.ListRolesForCharacters(ctx, characterIDs)
+	if err != nil {
+		return nil, err
+	}
+	// The query orders by character_id, priority, role, so appending preserves the
+	// priority order the select menu renders in.
+	out := make(map[uuid.UUID][]RoleChoice, len(characterIDs))
+	for _, r := range rows {
+		out[r.CharacterID] = append(out[r.CharacterID], RoleChoice{Role: r.Role, Priority: r.Priority})
+	}
+	return out, nil
+}
+
 func characterFromRow(row db.Character) (Character, error) {
 	ilvl, err := nullableFloat64(row.Ilvl)
 	if err != nil {

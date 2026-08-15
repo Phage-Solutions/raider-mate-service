@@ -48,6 +48,19 @@ func requireAuth(next http.Handler, apiKey string, roles raidLeadRoleLister, log
 	})
 }
 
+// requireServiceKey checks the shared client key and nothing else. It guards the
+// routes the bot process calls on its own behalf rather than on a raider's, where
+// there is no interaction to take actor headers from and no single guild to scope to.
+func requireServiceKey(next http.Handler, apiKey string, logger *slog.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !validAPIKey(r.Header.Get("Authorization"), apiKey) {
+			writeError(w, logger, http.StatusUnauthorized, "invalid or missing API key")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func validAPIKey(header, want string) bool {
 	got, ok := strings.CutPrefix(header, bearerPrefix)
 	if !ok {

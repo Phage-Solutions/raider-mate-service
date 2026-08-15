@@ -37,7 +37,7 @@ const claimLease = 5 * time.Minute
 // outboxStore is the persistence Outbox needs. Declared here, by the consumer.
 type outboxStore interface {
 	ClaimNotifications(ctx context.Context, guildID *int64, claimedBefore time.Time, limit int32) ([]StoredNotification, error)
-	MarkNotificationDelivered(ctx context.Context, id uuid.UUID, discordGuildID int64) error
+	MarkNotificationDelivered(ctx context.Context, id uuid.UUID, discordGuildID *int64) error
 }
 
 // Outbox is the bot's read/ack side of the notifications table: it claims undelivered
@@ -64,9 +64,10 @@ func (o *Outbox) Claim(ctx context.Context, guildID *int64, limit int32) ([]Stor
 	return notifications, nil
 }
 
-// MarkDelivered acks one notification. discordGuildID scopes the ack: acking by id
-// alone would let any caller suppress another guild's reminders.
-func (o *Outbox) MarkDelivered(ctx context.Context, id uuid.UUID, discordGuildID int64) error {
+// MarkDelivered acks one notification. A nil discordGuildID acks by id alone, which
+// only the bot's service-key route may do; anything a raider can reach passes their
+// guild, or they could suppress another guild's reminders.
+func (o *Outbox) MarkDelivered(ctx context.Context, id uuid.UUID, discordGuildID *int64) error {
 	if err := o.store.MarkNotificationDelivered(ctx, id, discordGuildID); err != nil {
 		return fmt.Errorf("marking notification delivered: %w", err)
 	}

@@ -105,19 +105,22 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 
 const markNotificationDelivered = `-- name: MarkNotificationDelivered :execrows
 UPDATE notifications SET delivered_at = now()
-WHERE id = $1 AND discord_guild_id = $2
+WHERE id = $1
+  AND ($2::bigint IS NULL OR discord_guild_id = $2)
 `
 
 type MarkNotificationDeliveredParams struct {
-	ID             uuid.UUID
-	DiscordGuildID int64
+	ID      uuid.UUID
+	GuildID *int64
 }
 
-// Guild-scoped: without it, any caller could ack another guild's notification by id
-// and silently suppress their reminders. Returning the row count lets the caller tell
+// guild_id is optional, and the two callers differ. The bot acks across every guild
+// from behind the service key, so it passes NULL. Anything reached by a raider's
+// interaction must pass their guild, or acking by id alone would let them silently
+// suppress another guild's reminders. Returning the row count lets the caller tell
 // "not yours or not found" from "done".
 func (q *Queries) MarkNotificationDelivered(ctx context.Context, arg MarkNotificationDeliveredParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markNotificationDelivered, arg.ID, arg.DiscordGuildID)
+	result, err := q.db.Exec(ctx, markNotificationDelivered, arg.ID, arg.GuildID)
 	if err != nil {
 		return 0, err
 	}

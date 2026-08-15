@@ -117,6 +117,65 @@ func TestRequireAuthReturns500OnARoleLookupFailure(t *testing.T) {
 	}
 }
 
+func TestRequireServiceKeyPassesWithNoActorHeaders(t *testing.T) {
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	r := httptest.NewRequest(http.MethodGet, "/api/notifications", nil)
+	r.Header.Set("Authorization", "Bearer secret-key")
+	w := httptest.NewRecorder()
+	requireServiceKey(next, "secret-key", testLogger()).ServeHTTP(w, r)
+
+	if !called {
+		t.Fatalf("next handler not called, want the request through without actor headers")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestRequireServiceKeyRejectsAWrongKey(t *testing.T) {
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatalf("next handler called, want the request rejected before it")
+	})
+
+	r := httptest.NewRequest(http.MethodGet, "/api/notifications", nil)
+	r.Header.Set("Authorization", "Bearer wrong-key")
+	w := httptest.NewRecorder()
+	requireServiceKey(next, "secret-key", testLogger()).ServeHTTP(w, r)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+// The notification routes and the "/api/" prefix both match, and only ServeMux's
+// specificity rule keeps the outbox off the actor-header path. If the precedence ever
+// flipped, this request would reach requireAuth and 400 on the missing headers.
+func TestNotificationRoutesBeatTheAuthenticatedAPIPrefix(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.Handle("/api/", requireAuth(
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Fatalf("request reached the actor-scoped mux, want the service-key route")
+		}),
+		"secret-key", fakeRoleLister{}, testLogger()))
+	mux.Handle("GET /api/notifications", requireServiceKey(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+		"secret-key", testLogger()))
+
+	r := httptest.NewRequest(http.MethodGet, "/api/notifications", nil)
+	r.Header.Set("Authorization", "Bearer secret-key")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
 func TestValidAPIKeyRequiresTheBearerPrefix(t *testing.T) {
 	if validAPIKey("secret-key", "secret-key") {
 		t.Errorf("validAPIKey without the Bearer prefix = true, want false")

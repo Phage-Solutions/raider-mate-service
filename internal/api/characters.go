@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -59,27 +60,53 @@ func characterToResponse(c roster.Character, owned, isRaidLead bool) characterRe
 // resource: a signup row, a comp slot. Enough to draw the line without a second
 // request, and no links of its own, since the full character resource carries those.
 type characterSummary struct {
-	ID     string   `json:"id"`
-	Name   string   `json:"name"`
-	Realm  string   `json:"realm"`
-	Class  *string  `json:"class,omitempty"`
-	Spec   *string  `json:"spec,omitempty"`
-	Ilvl   *float64 `json:"ilvl,omitempty"`
-	IsMain bool     `json:"is_main"`
+	ID    string   `json:"id"`
+	Name  string   `json:"name"`
+	Realm string   `json:"realm"`
+	Class *string  `json:"class,omitempty"`
+	Spec  *string  `json:"spec,omitempty"`
+	Ilvl  *float64 `json:"ilvl,omitempty"`
+	// Roles is the character's whole menu, in priority order. It rides along because
+	// the bot's embed needs it on every row: the flex marker beside a name, and the
+	// grouping of signups by what each raider can play before a comp is locked. One
+	// batched read here beats a request per raider to redraw one message.
+	Roles  []roleChoiceResponse `json:"roles"`
+	IsMain bool                 `json:"is_main"`
 }
 
 // characterSummaries indexes a guild roster by character id. Signup lists and comp
 // boards both carry bare character ids, and every client rendering one needs names:
 // one roster read here beats the same join repeated in the bot and the dashboard.
-func characterSummaries(list []roster.Character) map[uuid.UUID]characterSummary {
+func characterSummaries(list []roster.Character, roles map[uuid.UUID][]roster.RoleChoice) map[uuid.UUID]characterSummary {
 	out := make(map[uuid.UUID]characterSummary, len(list))
 	for _, c := range list {
 		out[c.ID] = characterSummary{
 			ID: c.ID.String(), Name: c.Name, Realm: c.Realm,
-			Class: c.Class, Spec: c.Spec, Ilvl: c.Ilvl, IsMain: c.IsMain,
+			Class: c.Class, Spec: c.Spec, Ilvl: c.Ilvl,
+			Roles: roleChoicesToResponse(roles[c.ID]), IsMain: c.IsMain,
 		}
 	}
 	return out
+}
+
+// guildRoster reads a guild's characters and their role menus, indexed for rendering
+// them inside someone else's resource.
+func guildRoster(ctx context.Context, characters *roster.Characters, discordGuildID int64) (map[uuid.UUID]characterSummary, error) {
+	list, err := characters.ListForGuild(ctx, discordGuildID)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]uuid.UUID, len(list))
+	for i, c := range list {
+		ids[i] = c.ID
+	}
+	roles, err := characters.ListRolesForMany(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	return characterSummaries(list, roles), nil
 }
 
 // lookupCharacter returns the summary for id, or nil when the roster read did not
@@ -271,6 +298,14 @@ type roleChoiceResponse struct {
 	Priority int16  `json:"priority"`
 }
 
+func roleChoicesToResponse(roles []roster.RoleChoice) []roleChoiceResponse {
+	out := make([]roleChoiceResponse, len(roles))
+	for i, rc := range roles {
+		out[i] = roleChoiceResponse{Role: string(rc.Role), Priority: rc.Priority}
+	}
+	return out
+}
+
 // getCharacterRolesHandler returns a character's current role menu. The bot needs
 // this to render the role select with the raider's existing picks already ticked:
 // the PUT replaces the whole menu, so a select that opens blank silently drops
@@ -289,11 +324,7 @@ func getCharacterRolesHandler(characters *roster.Characters, logger *slog.Logger
 			return
 		}
 
-		out := make([]roleChoiceResponse, len(roles))
-		for i, rc := range roles {
-			out[i] = roleChoiceResponse{Role: string(rc.Role), Priority: rc.Priority}
-		}
-		writeJSON(w, logger, http.StatusOK, out)
+		writeJSON(w, logger, http.StatusOK, roleChoicesToResponse(roles))
 	}
 }
 

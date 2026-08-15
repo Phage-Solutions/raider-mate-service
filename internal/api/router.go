@@ -66,10 +66,15 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, logger *slog.Logger) http.Hand
 	apiMux.HandleFunc("PUT /api/events/{id}/comps/{name}/mode", setCompModeHandler(manual, events, logger))
 	apiMux.HandleFunc("POST /api/events/{id}/comps/{name}/lock", lockCompHandler(locker, characters, events, logger))
 
-	apiMux.HandleFunc("GET /api/notifications", listNotificationsHandler(outbox, logger))
-	apiMux.HandleFunc("POST /api/notifications/{id}/delivered", markNotificationDeliveredHandler(outbox, logger))
-
 	mux.Handle("/api/", requireAuth(apiMux, apiKey, signupStore, logger))
+
+	// The outbox is the bot talking as itself rather than on a raider's behalf, so it
+	// takes the shared key alone and no actor headers. Both patterns are more specific
+	// than the "/api/" prefix above, which is what routes them here instead.
+	mux.Handle("GET /api/notifications",
+		requireServiceKey(listNotificationsHandler(outbox, logger), apiKey, logger))
+	mux.Handle("POST /api/notifications/{id}/delivered",
+		requireServiceKey(markNotificationDeliveredHandler(outbox, logger), apiKey, logger))
 
 	return recoverPanic(logRequests(mux, logger), logger)
 }

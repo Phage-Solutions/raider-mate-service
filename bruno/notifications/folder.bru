@@ -1,7 +1,9 @@
 headers {
   Authorization: Bearer {{serviceApiKey}}
-  X-Actor-Discord-Id: {{actorDiscordId}}
-  X-Actor-Guild-Id: {{actorGuildId}}
-  X-Actor-Roles: {{actorRoles}}
-  X-Actor-Guild-Admin: {{actorGuildAdmin}}
+}
+
+docs {
+  These two routes are the bot's outbox, called by the bot process on its own behalf
+  rather than on a raider's. They sit behind the shared key alone, with no actor
+  headers, so one claim spans every guild.
 }

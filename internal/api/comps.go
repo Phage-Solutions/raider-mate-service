@@ -72,16 +72,6 @@ func assignmentsToResponse(assignments []comp.Assignment, byID map[uuid.UUID]cha
 	return out
 }
 
-// compRoster reads the guild roster so a board's slots can carry names. Failure is
-// the caller's to report; a board of anonymous UUIDs is not worth serving.
-func compRoster(r *http.Request, characters *roster.Characters, discordGuildID int64) (map[uuid.UUID]characterSummary, error) {
-	list, err := characters.ListForGuild(r.Context(), discordGuildID)
-	if err != nil {
-		return nil, err
-	}
-	return characterSummaries(list), nil
-}
-
 func advisoriesToResponse(advisories []comp.Advisory) []advisoryResponse {
 	if len(advisories) == 0 {
 		return nil
@@ -154,7 +144,7 @@ func getCompHandler(reader *comp.Reader, characters *roster.Characters, events e
 			return
 		}
 
-		byID, err := compRoster(r, characters, event.DiscordGuildID)
+		byID, err := guildRoster(r.Context(), characters, event.DiscordGuildID)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "listing guild characters", "error", err)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
@@ -203,7 +193,7 @@ func lockCompHandler(locker *comp.Locker, characters *roster.Characters, events 
 			return
 		}
 
-		byID, err := compRoster(r, characters, event.DiscordGuildID)
+		byID, err := guildRoster(r.Context(), characters, event.DiscordGuildID)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "listing guild characters", "error", err)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
@@ -286,7 +276,7 @@ func saveCompHandler(manual *comp.Manual, characters *roster.Characters, events 
 			logger.ErrorContext(r.Context(), "saving comp", "error", err)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
 		default:
-			byID, err := compRoster(r, characters, event.DiscordGuildID)
+			byID, err := guildRoster(r.Context(), characters, event.DiscordGuildID)
 			if err != nil {
 				logger.ErrorContext(r.Context(), "listing guild characters", "error", err)
 				writeError(w, logger, http.StatusInternalServerError, "internal error")

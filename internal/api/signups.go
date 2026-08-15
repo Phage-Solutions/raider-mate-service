@@ -261,13 +261,12 @@ func listSignupsHandler(signups *signup.Signups, characters *roster.Characters, 
 			}
 		}
 
-		roster, err := characters.ListForGuild(r.Context(), int64(actor.GuildID)) //nolint:gosec
+		byID, err := guildRoster(r.Context(), characters, int64(actor.GuildID)) //nolint:gosec
 		if err != nil {
 			logger.ErrorContext(r.Context(), "listing guild characters", "error", err)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
 			return
 		}
-		byID := characterSummaries(roster)
 
 		out := make([]signupResponse, len(list))
 		for i, s := range list {

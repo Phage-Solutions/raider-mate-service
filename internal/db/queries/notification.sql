@@ -24,8 +24,11 @@ WHERE id IN (
 RETURNING *;
 
 -- name: MarkNotificationDelivered :execrows
--- Guild-scoped: without it, any caller could ack another guild's notification by id
--- and silently suppress their reminders. Returning the row count lets the caller tell
+-- guild_id is optional, and the two callers differ. The bot acks across every guild
+-- from behind the service key, so it passes NULL. Anything reached by a raider's
+-- interaction must pass their guild, or acking by id alone would let them silently
+-- suppress another guild's reminders. Returning the row count lets the caller tell
 -- "not yours or not found" from "done".
 UPDATE notifications SET delivered_at = now()
-WHERE id = $1 AND discord_guild_id = $2;
+WHERE id = $1
+  AND (sqlc.narg(guild_id)::bigint IS NULL OR discord_guild_id = sqlc.narg(guild_id));

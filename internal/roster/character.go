@@ -55,6 +55,7 @@ type characterStore interface {
 	ListCharactersByDiscord(ctx context.Context, discordID, discordGuildID int64) ([]Character, error)
 	ReplaceCharacterRoles(ctx context.Context, characterID uuid.UUID, roles []RoleChoice) error
 	ListCharacterRoles(ctx context.Context, characterID uuid.UUID) ([]RoleChoice, error)
+	ListRolesForCharacters(ctx context.Context, characterIDs []uuid.UUID) (map[uuid.UUID][]RoleChoice, error)
 }
 
 // Characters registers characters and manages their role menus. Roles live here,
@@ -182,6 +183,19 @@ func (c *Characters) SetRoles(ctx context.Context, characterID uuid.UUID, roles 
 
 func (c *Characters) ListRoles(ctx context.Context, characterID uuid.UUID) ([]RoleChoice, error) {
 	roles, err := c.store.ListCharacterRoles(ctx, characterID)
+	if err != nil {
+		return nil, fmt.Errorf("listing roles: %w", err)
+	}
+	return roles, nil
+}
+
+// ListRolesForMany reads the role menus of a whole roster in one query. A character
+// with no menu is absent from the map rather than present with an empty slice.
+func (c *Characters) ListRolesForMany(ctx context.Context, characterIDs []uuid.UUID) (map[uuid.UUID][]RoleChoice, error) {
+	if len(characterIDs) == 0 {
+		return map[uuid.UUID][]RoleChoice{}, nil
+	}
+	roles, err := c.store.ListRolesForCharacters(ctx, characterIDs)
 	if err != nil {
 		return nil, fmt.Errorf("listing roles: %w", err)
 	}

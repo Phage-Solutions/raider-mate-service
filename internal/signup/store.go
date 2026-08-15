@@ -347,9 +347,9 @@ func (s *Store) ClaimNotifications(ctx context.Context, guildID *int64, claimedB
 	return out, nil
 }
 
-func (s *Store) MarkNotificationDelivered(ctx context.Context, id uuid.UUID, discordGuildID int64) error {
+func (s *Store) MarkNotificationDelivered(ctx context.Context, id uuid.UUID, discordGuildID *int64) error {
 	rows, err := s.queries.MarkNotificationDelivered(ctx, db.MarkNotificationDeliveredParams{
-		ID: id, DiscordGuildID: discordGuildID,
+		ID: id, GuildID: discordGuildID,
 	})
 	if err != nil {
 		return err
