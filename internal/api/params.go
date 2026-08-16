@@ -74,3 +74,11 @@ func parseRole(s string) (db.RoleEnum, error) {
 func parseCompMode(s string) (db.CompMode, error) {
 	return parseEnum(s, []db.CompMode{db.CompModeAUTO, db.CompModeMANUAL}, "mode")
 }
+
+func parseChannelType(s string) (db.DiscordChannelType, error) {
+	return parseEnum(s, []db.DiscordChannelType{
+		db.DiscordChannelTypeTEXT, db.DiscordChannelTypeANNOUNCEMENT, db.DiscordChannelTypeVOICE,
+		db.DiscordChannelTypeSTAGEVOICE, db.DiscordChannelTypeFORUM, db.DiscordChannelTypeCATEGORY,
+		db.DiscordChannelTypeOTHER,
+	}, "type")
+}

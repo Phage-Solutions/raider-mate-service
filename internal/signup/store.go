@@ -447,6 +447,91 @@ func (s *Store) UpsertGuildSettings(ctx context.Context, settings GuildSettings)
 	}, nil
 }
 
+// GuildChannels reads a guild's channel catalog, as the bot last pushed it.
+func (s *Store) GuildChannels(ctx context.Context, discordGuildID int64) ([]Channel, error) {
+	rows, err := s.queries.ListGuildChannels(ctx, discordGuildID)
+	if err != nil {
+		return nil, err
+	}
+	channels := make([]Channel, len(rows))
+	for i, row := range rows {
+		channels[i] = Channel{DiscordChannelID: row.DiscordChannelID, Name: row.Name, Type: row.Type}
+	}
+	return channels, nil
+}
+
+// ReplaceGuildChannels overwrites a guild's whole channel catalog in one transaction,
+// same reasoning as ReplaceRaidLeadRoleIDs: a push that half-applies would leave a
+// stale channel alongside the bot's current set.
+func (s *Store) ReplaceGuildChannels(ctx context.Context, discordGuildID int64, channels []Channel) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	q := s.queries.WithTx(tx)
+
+	if err := q.DeleteGuildChannels(ctx, discordGuildID); err != nil {
+		return fmt.Errorf("clearing existing channels: %w", err)
+	}
+	for _, channel := range channels {
+		if err := q.InsertGuildChannel(ctx, db.InsertGuildChannelParams{
+			DiscordGuildID: discordGuildID, DiscordChannelID: channel.DiscordChannelID,
+			Name: channel.Name, Type: channel.Type,
+		}); err != nil {
+			return fmt.Errorf("inserting channel %d: %w", channel.DiscordChannelID, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing tx: %w", err)
+	}
+	return nil
+}
+
+// GuildRoles reads a guild's role catalog, as the bot last pushed it.
+func (s *Store) GuildRoles(ctx context.Context, discordGuildID int64) ([]Role, error) {
+	rows, err := s.queries.ListGuildRoles(ctx, discordGuildID)
+	if err != nil {
+		return nil, err
+	}
+	roles := make([]Role, len(rows))
+	for i, row := range rows {
+		roles[i] = Role{DiscordRoleID: row.DiscordRoleID, Name: row.Name, Color: row.Color, Position: row.Position}
+	}
+	return roles, nil
+}
+
+// ReplaceGuildRoles overwrites a guild's whole role catalog, same shape as
+// ReplaceGuildChannels.
+func (s *Store) ReplaceGuildRoles(ctx context.Context, discordGuildID int64, roles []Role) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	q := s.queries.WithTx(tx)
+
+	if err := q.DeleteGuildRoles(ctx, discordGuildID); err != nil {
+		return fmt.Errorf("clearing existing roles: %w", err)
+	}
+	for _, role := range roles {
+		if err := q.InsertGuildRole(ctx, db.InsertGuildRoleParams{
+			DiscordGuildID: discordGuildID, DiscordRoleID: role.DiscordRoleID,
+			Name: role.Name, Color: role.Color, Position: role.Position,
+		}); err != nil {
+			return fmt.Errorf("inserting role %d: %w", role.DiscordRoleID, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing tx: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) ClaimNotifications(ctx context.Context, guildID *int64, claimedBefore time.Time, limit int32) ([]StoredNotification, error) {
 	rows, err := s.queries.ClaimNotifications(ctx, db.ClaimNotificationsParams{
 		GuildID:       guildID,

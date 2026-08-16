@@ -54,6 +54,53 @@ func (ns NullCompMode) Value() (driver.Value, error) {
 	return string(ns.CompMode), nil
 }
 
+type DiscordChannelType string
+
+const (
+	DiscordChannelTypeTEXT         DiscordChannelType = "TEXT"
+	DiscordChannelTypeANNOUNCEMENT DiscordChannelType = "ANNOUNCEMENT"
+	DiscordChannelTypeVOICE        DiscordChannelType = "VOICE"
+	DiscordChannelTypeSTAGEVOICE   DiscordChannelType = "STAGE_VOICE"
+	DiscordChannelTypeFORUM        DiscordChannelType = "FORUM"
+	DiscordChannelTypeCATEGORY     DiscordChannelType = "CATEGORY"
+	DiscordChannelTypeOTHER        DiscordChannelType = "OTHER"
+)
+
+func (e *DiscordChannelType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DiscordChannelType(s)
+	case string:
+		*e = DiscordChannelType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DiscordChannelType: %T", src)
+	}
+	return nil
+}
+
+type NullDiscordChannelType struct {
+	DiscordChannelType DiscordChannelType
+	Valid              bool // Valid is true if DiscordChannelType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDiscordChannelType) Scan(value interface{}) error {
+	if value == nil {
+		ns.DiscordChannelType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DiscordChannelType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDiscordChannelType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DiscordChannelType), nil
+}
+
 type EventType string
 
 const (
@@ -511,9 +558,24 @@ type Event struct {
 	Difficulty     *RaidDifficulty
 }
 
+type GuildChannel struct {
+	DiscordGuildID   int64
+	DiscordChannelID int64
+	Name             string
+	Type             DiscordChannelType
+}
+
 type GuildRaidLeadRole struct {
 	DiscordGuildID int64
 	DiscordRoleID  int64
+}
+
+type GuildRole struct {
+	DiscordGuildID int64
+	DiscordRoleID  int64
+	Name           string
+	Color          int32
+	Position       int32
 }
 
 type GuildSetting struct {

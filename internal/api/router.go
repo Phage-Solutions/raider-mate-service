@@ -33,6 +33,7 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *s
 	raidLeads := signup.NewRaidLeads(signupStore)
 	settings := signup.NewSettings(signupStore)
 	outbox := signup.NewOutbox(signupStore)
+	catalog := signup.NewGuildCatalog(signupStore)
 
 	apiMux := http.NewServeMux()
 
@@ -41,6 +42,9 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *s
 
 	apiMux.HandleFunc("GET /api/guilds/{gid}/settings", getGuildSettingsHandler(settings, logger))
 	apiMux.HandleFunc("PUT /api/guilds/{gid}/settings", putGuildSettingsHandler(settings, logger))
+
+	apiMux.HandleFunc("GET /api/guilds/{gid}/discord-channels", listGuildChannelsHandler(catalog, logger))
+	apiMux.HandleFunc("GET /api/guilds/{gid}/discord-roles", listGuildRolesHandler(catalog, logger))
 
 	apiMux.HandleFunc("POST /api/guilds/{gid}/characters", createCharacterHandler(characters, logger))
 	apiMux.HandleFunc("GET /api/guilds/{gid}/characters", listGuildCharactersHandler(characters, logger))
@@ -81,6 +85,15 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *s
 		requireServiceKey(markNotificationDeliveredHandler(outbox, logger), apiKey, logger))
 	mux.Handle("GET /api/notifications/stream",
 		requireServiceKey(streamNotificationsHandler(queued, logger), apiKey, logger))
+
+	// The catalog push is the bot reporting its own view of a guild's channels and
+	// roles, not something done on a raider's behalf, so it takes the shared key alone,
+	// same reasoning as the notifications block above. Guild-scoped, unlike the
+	// notifications routes, since the bot pushes one guild's catalog at a time.
+	mux.Handle("PUT /api/guilds/{gid}/discord-channels",
+		requireServiceKey(putGuildChannelsHandler(catalog, logger), apiKey, logger))
+	mux.Handle("PUT /api/guilds/{gid}/discord-roles",
+		requireServiceKey(putGuildRolesHandler(catalog, logger), apiKey, logger))
 
 	return recoverPanic(logRequests(mux, logger), logger)
 }

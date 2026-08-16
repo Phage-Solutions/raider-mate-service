@@ -12,6 +12,17 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-16
+
+### Added
+
+- `GET`/`PUT /api/guilds/{gid}/discord-channels` and `GET`/`PUT /api/guilds/{gid}/discord-roles`:
+  a per-guild catalog of Discord channels and roles. The `PUT` is the bot pushing its
+  own view of the guild (shared-key auth, no actor), replacing the whole catalog each
+  time. The `GET` is guild-admin only and backs a dashboard picker for
+  `guild_settings.events_channel_id` and `event_mention_role_ids`, neither of which had
+  a source of "what's actually in this guild" to pick from before this.
+
 ## [0.2.0] - 2026-08-16
 
 ### Added
