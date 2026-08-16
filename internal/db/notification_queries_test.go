@@ -234,3 +234,35 @@ func TestNotificationCheckConstraintRejectsUserRowWithNoDiscordID(t *testing.T) 
 		t.Fatalf("inserting USER notification with no discord_id: got %v, want a check_violation", err)
 	}
 }
+
+// The kind arrived in migration 00002, after the squashed baseline. Nothing else
+// exercises the value against a real enum, so a migration that never ran would only
+// show up as a failed insert in production.
+func TestInsertNotificationAcceptsCompSlotDropped(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	event := seedEventForJobs(ctx, t, q, 45)
+	channelID := int64(555)
+
+	if _, err := q.InsertNotification(ctx, InsertNotificationParams{
+		ID:             NewID(),
+		DiscordGuildID: 100,
+		EventID:        event.ID,
+		Kind:           NotificationKindCOMPSLOTDROPPED,
+		TargetKind:     NotificationTargetROLE,
+		RoleIds:        []int64{777},
+		ChannelID:      &channelID,
+		Payload:        []byte(`{"event_title":"Prog Night","comp_names":["prog"]}`),
+	}); err != nil {
+		t.Fatalf("inserting COMP_SLOT_DROPPED notification: %v", err)
+	}
+
+	claimed, err := q.ClaimNotifications(ctx, claimParams(10, nil))
+	if err != nil {
+		t.Fatalf("claiming: %v", err)
+	}
+	if len(claimed) != 1 || claimed[0].Kind != NotificationKindCOMPSLOTDROPPED {
+		t.Fatalf("claimed = %+v, want one COMP_SLOT_DROPPED row", claimed)
+	}
+}

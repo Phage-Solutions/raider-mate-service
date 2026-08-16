@@ -224,7 +224,13 @@ func (r *Runner) buildSignupDeadline(ctx context.Context, tx reminderStore, even
 	if err != nil {
 		return nil, false, fmt.Errorf("listing signups: %w", err)
 	}
-	counts := make(map[db.SignupStatus]int, len(signups))
+	// Seeded with every status rather than only the ones present, so the bot can
+	// render "0 absent" without knowing the enum itself.
+	all := AllStatuses()
+	counts := make(map[db.SignupStatus]int, len(all))
+	for _, status := range all {
+		counts[status] = 0
+	}
 	for _, s := range signups {
 		counts[s.Status]++
 	}

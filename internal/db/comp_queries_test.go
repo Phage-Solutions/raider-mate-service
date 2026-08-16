@@ -4,6 +4,7 @@ package db
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -380,5 +381,124 @@ func TestClearAssignedRolesNullsOutBenchedSignups(t *testing.T) {
 	}
 	if signups[0].Status != SignupStatusCONFIRMED {
 		t.Errorf("status = %s, want CONFIRMED untouched", signups[0].Status)
+	}
+}
+
+// seedLockedSlots puts the character in both of seedEventForComp's comps, the state a
+// comp lock leaves behind.
+func seedLockedSlots(ctx context.Context, t *testing.T, q *Queries, event Event, character Character) {
+	t.Helper()
+
+	for i, name := range []string{"prog", "farm"} {
+		if err := q.InsertCompSlot(ctx, InsertCompSlotParams{
+			ID:      NewID(),
+			EventID: event.ID, CompName: name, CharacterID: character.ID,
+			Role: RoleEnumTANK, SlotIndex: int16(i), IsBench: false,
+			Reason: "TANK: priority 1, main, first signup",
+		}); err != nil {
+			t.Fatalf("inserting comp slot in %q: %v", name, err)
+		}
+	}
+}
+
+// A raider who goes absent leaves a hole in every draft they were in, not only the one
+// someone happens to be looking at.
+func TestDropCompSlotsForCharacterEmptiesEveryCompAndReportsWhich(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	event, character := seedEventForComp(ctx, t, q, 25)
+	seedLockedSlots(ctx, t, q, event, character)
+
+	if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
+		ID:      NewID(),
+		EventID: event.ID, CharacterID: character.ID, Status: SignupStatusABSENT,
+	}); err != nil {
+		t.Fatalf("writing ABSENT signup: %v", err)
+	}
+
+	dropped, err := q.DropCompSlotsForCharacter(ctx, DropCompSlotsForCharacterParams{
+		EventID: event.ID, CharacterID: character.ID,
+	})
+	if err != nil {
+		t.Fatalf("dropping comp slots: %v", err)
+	}
+	slices.Sort(dropped)
+	if !slices.Equal(dropped, []string{"farm", "prog"}) {
+		t.Errorf("dropped = %v, want both comps named", dropped)
+	}
+
+	// CountCompSlotsForEvent is what COMP_NAG reads as "locked", so a slot left behind
+	// keeps the event looking locked around a seat nobody is in.
+	count, err := q.CountCompSlotsForEvent(ctx, event.ID)
+	if err != nil {
+		t.Fatalf("counting comp slots: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("comp slots = %d, want 0", count)
+	}
+}
+
+// LATE is in the assignment pool: "I'll be 20 minutes late" is still a seat, and
+// dropping it would rebuild the comp around someone who is on their way.
+func TestDropCompSlotsForCharacterKeepsSeatsStillInThePool(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	event, character := seedEventForComp(ctx, t, q, 26)
+	seedLockedSlots(ctx, t, q, event, character)
+
+	until := time.Now().Add(20 * time.Minute)
+	if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
+		ID:      NewID(),
+		EventID: event.ID, CharacterID: character.ID, Status: SignupStatusLATE,
+		LateUntil: pgtype.Timestamptz{Time: until, Valid: true},
+	}); err != nil {
+		t.Fatalf("writing LATE signup: %v", err)
+	}
+
+	dropped, err := q.DropCompSlotsForCharacter(ctx, DropCompSlotsForCharacterParams{
+		EventID: event.ID, CharacterID: character.ID,
+	})
+	if err != nil {
+		t.Fatalf("dropping comp slots: %v", err)
+	}
+	if len(dropped) != 0 {
+		t.Errorf("dropped = %v, want none: LATE still holds a seat", dropped)
+	}
+
+	count, err := q.CountCompSlotsForEvent(ctx, event.ID)
+	if err != nil {
+		t.Fatalf("counting comp slots: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("comp slots = %d, want 2", count)
+	}
+}
+
+// A withdrawal deletes the signup outright, which is the strongest form of "not in the
+// pool": the NOT EXISTS finds no row at all rather than a row with the wrong status.
+func TestDropCompSlotsForCharacterEmptiesSeatsOfAWithdrawnSignup(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	event, character := seedEventForComp(ctx, t, q, 27)
+	seedLockedSlots(ctx, t, q, event, character)
+
+	if err := q.DeleteSignup(ctx, DeleteSignupParams{
+		EventID: event.ID, CharacterID: character.ID,
+	}); err != nil {
+		t.Fatalf("deleting signup: %v", err)
+	}
+
+	dropped, err := q.DropCompSlotsForCharacter(ctx, DropCompSlotsForCharacterParams{
+		EventID: event.ID, CharacterID: character.ID,
+	})
+	if err != nil {
+		t.Fatalf("dropping comp slots: %v", err)
+	}
+	slices.Sort(dropped)
+	if !slices.Equal(dropped, []string{"farm", "prog"}) {
+		t.Errorf("dropped = %v, want both comps named", dropped)
 	}
 }

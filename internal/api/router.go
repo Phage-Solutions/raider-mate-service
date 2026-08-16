@@ -28,7 +28,7 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *s
 
 	signupStore := signup.NewStore(pool)
 	events := signup.NewEvents(signupStore)
-	signups := signup.NewSignups(signupStore)
+	signups := signup.NewSignups(signupStore, logger)
 	lateRequests := signup.NewLateRequests(signupStore, logger)
 	raidLeads := signup.NewRaidLeads(signupStore)
 	settings := signup.NewSettings(signupStore)

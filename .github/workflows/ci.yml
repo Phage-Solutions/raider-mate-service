@@ -67,9 +67,6 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        cmd: [api, worker]
     steps:
       - uses: actions/checkout@v7
 
@@ -80,7 +77,6 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: .
-          build-args: CMD=${{ matrix.cmd }}
           push: false
-          cache-from: type=gha,scope=${{ matrix.cmd }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.cmd }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

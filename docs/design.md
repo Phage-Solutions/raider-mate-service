@@ -245,16 +245,26 @@ CONFIRMED | TENTATIVE | DECLINED | LATE | ABSENT | NO_SHOW
 
 Split by who owns them:
 
-- **Self-reported** (player controls): `CONFIRMED`, `TENTATIVE`, `DECLINED`, `LATE`
-- **Assigned** (raid lead controls): `ABSENT`, `NO_SHOW`
+- **Self-reported** (player controls): `CONFIRMED`, `TENTATIVE`, `DECLINED`, `LATE`,
+  `ABSENT`
+- **Assigned** (raid lead controls): `NO_SHOW`
 
-> `BENCH` is gone as of the step 3 assigner, dropped from the enum in migration
-> `00011`. Bench membership lives on `comp_slots.is_bench` instead, decided fresh by
-> every lock; `signups.status` keeps whatever the raider self-reported (usually
-> `CONFIRMED`) so re-locking a comp can never corrupt it. `ABSENT` and `NO_SHOW` are
-> unaffected and remain raid-lead-controlled.
+`ABSENT` and `DECLINED` are both a no, and the difference is scope: `DECLINED` answers
+this event, `ABSENT` says the raider is out for a stretch (a holiday, a break). Only
+the raider knows which one it is, so `ABSENT` is theirs to write. `NO_SHOW` is the one
+a raid lead holds alone: it is a judgement about what happened on the night, not
+something anyone reports about themselves.
+
+> `BENCH` is gone as of the step 3 assigner and is not in the enum. Bench membership
+> lives on `comp_slots.is_bench` instead, decided fresh by every lock;
+> `signups.status` keeps whatever the raider self-reported (usually `CONFIRMED`) so
+> re-locking a comp can never corrupt it.
 
 `late_until` makes "I'll be 20 minutes late" actionable rather than decorative.
+
+A signup response carries `allowed_statuses`: what this caller may `PUT`, so a client
+renders the buttons it has instead of discovering a 403. It is absent for a caller who
+cannot act on the signup at all, the same way its links are.
 
 ### The central design decision
 
@@ -303,6 +313,10 @@ over *optimal*. Priority-ordered greedy with a repair pass.
 assign(event, signups):
   needs = event.comp_template
   pool  = signups.filter(status in [CONFIRMED, LATE])
+  # A signup that later leaves this set takes its comp_slots rows with it, and the
+  # raid lead gets a COMP_SLOT_DROPPED notification. A locked comp that keeps a seat
+  # for someone who has said they are not coming is worse than an unlocked one.
+  # A withdrawal counts: no signup row at all is the strongest form of not in the pool.
 
   # Pass 1: scarce roles first
   for role in sortByScarcity(needs):        # TANK, HEALER, then DPS
@@ -374,6 +388,10 @@ edit/delete rather than validating at fire time.
 
 After `signup_deadline`, signups go read-only for players; raid leads can still add
 manually. Late signups land in a requests queue rather than silently failing.
+
+Not every notification traces back to a scheduled job. `LATE_REQUEST_FILED`,
+`ROSTER_UPDATED`, and `COMP_SLOT_DROPPED` fire on a write, the moment there is
+something to say, with no `scheduled_jobs` row behind them.
 
 ---
 

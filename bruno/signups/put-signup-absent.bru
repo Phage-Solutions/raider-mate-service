@@ -1,0 +1,23 @@
+meta {
+  name: put signup absent
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/api/events/{{eventId}}/signups/{{characterId}}
+  body: json
+  auth: none
+}
+
+docs {
+  ABSENT is self-reported: a raider declaring they are out for a stretch, wider than
+  DECLINED's "not this event". Run this after locking a comp the character is in and
+  the response drops their slot, queueing a COMP_SLOT_DROPPED notification.
+}
+
+body:json {
+  {
+    "status": "ABSENT"
+  }
+}

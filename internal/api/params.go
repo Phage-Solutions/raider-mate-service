@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Phage-Solutions/raider-mate-service/internal/db"
+	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
 )
 
 // pathUUID parses a path value as a UUID.
@@ -52,11 +53,10 @@ func parseEventType(s string) (db.EventType, error) {
 	return parseEnum(s, []db.EventType{db.EventTypeRAID, db.EventTypeMYTHICPLUS}, "type")
 }
 
+// parseSignupStatus accepts every value of the enum. Which of them this caller may
+// actually write is Signups.Write's answer, not a parse error.
 func parseSignupStatus(s string) (db.SignupStatus, error) {
-	return parseEnum(s, []db.SignupStatus{
-		db.SignupStatusCONFIRMED, db.SignupStatusTENTATIVE, db.SignupStatusDECLINED,
-		db.SignupStatusLATE, db.SignupStatusABSENT, db.SignupStatusNOSHOW,
-	}, "status")
+	return parseEnum(s, signup.AllStatuses(), "status")
 }
 
 func parseRaidDifficulty(s string) (db.RaidDifficulty, error) {

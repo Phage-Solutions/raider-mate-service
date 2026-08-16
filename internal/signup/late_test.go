@@ -84,6 +84,50 @@ func TestApproveWritesTheSignupAndMarksDecided(t *testing.T) {
 	}
 }
 
+// A withdrawal filed after the comp locked is the case that strands a seat: the write
+// happens in Approve, not in Signups.Write, so the eviction has to be reported there
+// too or the raid lead never hears about the hole.
+func TestApproveNotifiesWhenTheApprovedSignupEmptiesALockedComp(t *testing.T) {
+	channelID := int64(42)
+	store := newFakeSignupStore()
+	store.event = Event{ChannelID: &channelID}
+	store.dropFrom = []string{"prog comp"}
+
+	req, err := store.UpsertLateRequest(context.Background(), LateRequestWrite{
+		EventID: uuid.New(), CharacterID: uuid.New(), Status: db.SignupStatusDECLINED,
+	})
+	if err != nil {
+		t.Fatalf("seeding late request: %v", err)
+	}
+
+	if err := NewLateRequests(store, newTestLogger()).Approve(context.Background(), req.ID); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+
+	if len(store.notified) != 1 {
+		t.Fatalf("queued %d notifications, want 1", len(store.notified))
+	}
+	if got := store.notified[0].Kind; got != db.NotificationKindCOMPSLOTDROPPED {
+		t.Errorf("kind = %v, want COMP_SLOT_DROPPED", got)
+	}
+}
+
+// Same guarantee on the late-request side: a request filed with nothing telling the
+// raid lead is the failure the queue exists to prevent, so the filing fails with it.
+func TestFileFailsWhenTheNotificationCannotBeQueued(t *testing.T) {
+	channelID := int64(42)
+	store := newFakeSignupStore()
+	store.event = Event{ChannelID: &channelID}
+	store.notifyErr = errors.New("outbox unavailable")
+
+	_, err := NewLateRequests(store, newTestLogger()).File(context.Background(), LateRequestWrite{
+		EventID: uuid.New(), CharacterID: uuid.New(), Status: db.SignupStatusLATE,
+	})
+	if !errors.Is(err, store.notifyErr) {
+		t.Fatalf("err = %v, want the notification failure surfaced", err)
+	}
+}
+
 func TestApproveCarriesLateUntilThroughToTheSignup(t *testing.T) {
 	store := newFakeSignupStore()
 	until := time.Now().Add(30 * time.Minute)

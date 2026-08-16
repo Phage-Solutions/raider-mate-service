@@ -2,6 +2,7 @@ package signup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -135,6 +136,47 @@ func TestRunDueReminder1hUsesTheAssignedRolePerSignup(t *testing.T) {
 	}
 	if store.notified[0].DiscordID == nil || *store.notified[0].DiscordID != 1 {
 		t.Errorf("discord_id = %v, want 1", store.notified[0].DiscordID)
+	}
+}
+
+// The payload carries a key per status even at zero, so a bot can render "0 absent"
+// without hardcoding the enum. Counting only what turned up would hide exactly the
+// statuses a raid lead is checking for.
+func TestRunDueSignupDeadlineCountsEveryStatusIncludingZeroes(t *testing.T) {
+	channelID := int64(42)
+	store := &fakeReminderStore{
+		event: Event{Title: "Prog Night", ChannelID: &channelID},
+		jobs:  []db.ScheduledJob{{ID: uuid.New(), JobType: db.JobEnumSIGNUPDEADLINE}},
+		signups: []Signup{
+			{Status: db.SignupStatusCONFIRMED},
+			{Status: db.SignupStatusCONFIRMED},
+			{Status: db.SignupStatusABSENT},
+		},
+	}
+
+	if err := NewRunner(store, newTestLogger()).RunDue(context.Background(), 10); err != nil {
+		t.Fatalf("RunDue: %v", err)
+	}
+	if len(store.notified) != 1 {
+		t.Fatalf("notified = %d, want 1", len(store.notified))
+	}
+
+	var payload signupDeadlinePayload
+	if err := json.Unmarshal(store.notified[0].Payload, &payload); err != nil {
+		t.Fatalf("decoding payload: %v", err)
+	}
+	if len(payload.Counts) != len(AllStatuses()) {
+		t.Errorf("counts has %d keys, want %d (one per status)", len(payload.Counts), len(AllStatuses()))
+	}
+	for status, want := range map[db.SignupStatus]int{
+		db.SignupStatusCONFIRMED: 2,
+		db.SignupStatusABSENT:    1,
+		db.SignupStatusDECLINED:  0,
+		db.SignupStatusNOSHOW:    0,
+	} {
+		if got := payload.Counts[status]; got != want {
+			t.Errorf("counts[%s] = %d, want %d", status, got, want)
+		}
 	}
 }
 

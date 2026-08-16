@@ -69,16 +69,11 @@ jobs:
           name: release-notes
           path: notes.md
 
+  # One image, because the Dockerfile now runs the api and the worker as two processes
+  # under one entrypoint. A matrix here would push the same bytes twice under two names.
   publish:
     needs: [guard, changelog]
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - cmd: api
-            image: ghcr.io/phage-solutions/raider-mate-api
-          - cmd: worker
-            image: ghcr.io/phage-solutions/raider-mate-worker
     steps:
       - uses: actions/checkout@v7
 
@@ -96,7 +91,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ matrix.image }}
+          images: ghcr.io/phage-solutions/raider-mate-service
           flavor: latest=auto
           tags: |
             type=semver,pattern={{version}}
@@ -106,14 +101,12 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: .
-          build-args: |
-            CMD=${{ matrix.cmd }}
-            VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ github.ref_name }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.cmd }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.cmd }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # Last, so a failed image build leaves no release pointing at images that do not
   # exist.

@@ -24,7 +24,11 @@ type signupResponse struct {
 	AssignedRole *string           `json:"assigned_role,omitempty"`
 	LateUntil    *time.Time        `json:"late_until,omitempty"`
 	Note         *string           `json:"note,omitempty"`
-	Links        Links             `json:"_links"`
+	// AllowedStatuses is what this caller may PUT, so a client renders the buttons it
+	// has rather than discovering a 403. Empty for a caller who cannot act at all,
+	// the same way they get no links.
+	AllowedStatuses []string `json:"allowed_statuses,omitempty"`
+	Links           Links    `json:"_links"`
 }
 
 // signupLinks is the HATEOAS decision for one signup: self and withdraw are visible
@@ -39,21 +43,29 @@ func signupLinks(eventID, characterID string, canAct bool) Links {
 	return links
 }
 
-func signupToResponse(s signup.Signup, canAct bool) signupResponse {
+func signupToResponse(s signup.Signup, canAct, isRaidLead bool) signupResponse {
 	var assignedRole *string
 	if s.AssignedRole != nil {
 		r := string(*s.AssignedRole)
 		assignedRole = &r
 	}
 
+	var allowed []string
+	if canAct {
+		for _, status := range signup.AllowedStatuses(isRaidLead) {
+			allowed = append(allowed, string(status))
+		}
+	}
+
 	return signupResponse{
-		ID:           s.ID.String(),
-		CharacterID:  s.CharacterID.String(),
-		Status:       string(s.Status),
-		AssignedRole: assignedRole,
-		LateUntil:    s.LateUntil,
-		Note:         s.Note,
-		Links:        signupLinks(s.EventID.String(), s.CharacterID.String(), canAct),
+		ID:              s.ID.String(),
+		CharacterID:     s.CharacterID.String(),
+		Status:          string(s.Status),
+		AssignedRole:    assignedRole,
+		LateUntil:       s.LateUntil,
+		Note:            s.Note,
+		AllowedStatuses: allowed,
+		Links:           signupLinks(s.EventID.String(), s.CharacterID.String(), canAct),
 	}
 }
 
@@ -140,7 +152,7 @@ func putSignupHandler(signups *signup.Signups, lateRequests *signup.LateRequests
 			logger.ErrorContext(r.Context(), "writing signup", "error", err)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
 		default:
-			writeJSON(w, logger, http.StatusOK, signupToResponse(written, true))
+			writeJSON(w, logger, http.StatusOK, signupToResponse(written, true, actor.IsRaidLead))
 		}
 	}
 }
@@ -270,7 +282,7 @@ func listSignupsHandler(signups *signup.Signups, characters *roster.Characters, 
 
 		out := make([]signupResponse, len(list))
 		for i, s := range list {
-			out[i] = signupToResponse(s, actor.IsRaidLead || owned[s.CharacterID])
+			out[i] = signupToResponse(s, actor.IsRaidLead || owned[s.CharacterID], actor.IsRaidLead)
 			out[i].Character = lookupCharacter(byID, s.CharacterID)
 		}
 		writeJSON(w, logger, http.StatusOK, out)

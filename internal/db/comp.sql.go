@@ -54,6 +54,55 @@ func (q *Queries) DeleteCompSlots(ctx context.Context, arg DeleteCompSlotsParams
 	return err
 }
 
+const dropCompSlotsForCharacter = `-- name: DropCompSlotsForCharacter :many
+DELETE FROM comp_slots cs
+WHERE cs.event_id = $1 AND cs.character_id = $2
+  AND NOT EXISTS (
+      SELECT 1 FROM signups s
+      WHERE s.event_id = cs.event_id
+        AND s.character_id = cs.character_id
+        AND s.status IN ('CONFIRMED', 'LATE')
+  )
+RETURNING cs.comp_name
+`
+
+type DropCompSlotsForCharacterParams struct {
+	EventID     uuid.UUID
+	CharacterID uuid.UUID
+}
+
+// A signup that leaves the assignment pool takes its seats with it. Without this the
+// locked comp keeps a slot for someone who has said they are not coming, and
+// CountCompSlotsForEvent still reads the event as locked.
+//
+// The pool test is written here rather than in Go so it stays next to the one in
+// ListAssignmentPoolForEvent above: two definitions of "holds a seat" that drift are
+// how a raider ends up assigned and absent at once. Run this after the upsert and it
+// reads the status just written; run it with no signup row at all and it drops the
+// slots too, which is what a withdrawal means.
+//
+// One row per comp the character was in, never more: comp_slots is unique on
+// (event_id, comp_name, character_id), so nobody holds two seats in one comp.
+func (q *Queries) DropCompSlotsForCharacter(ctx context.Context, arg DropCompSlotsForCharacterParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, dropCompSlotsForCharacter, arg.EventID, arg.CharacterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var comp_name string
+		if err := rows.Scan(&comp_name); err != nil {
+			return nil, err
+		}
+		items = append(items, comp_name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getComp = `-- name: GetComp :one
 SELECT id, event_id, name, mode FROM comps
 WHERE event_id = $1 AND name = $2
@@ -129,8 +178,8 @@ type ListAssignmentPoolForEventRow struct {
 	SignedUpAt  pgtype.Timestamptz
 }
 
-// Confirmed and late signups only; declined, tentative, bench, absent, and no-show
-// never reach the assigner.
+// Confirmed and late signups only; declined, tentative, absent, and no-show never
+// reach the assigner.
 func (q *Queries) ListAssignmentPoolForEvent(ctx context.Context, eventID uuid.UUID) ([]ListAssignmentPoolForEventRow, error) {
 	rows, err := q.db.Query(ctx, listAssignmentPoolForEvent, eventID)
 	if err != nil {

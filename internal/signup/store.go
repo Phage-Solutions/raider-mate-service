@@ -26,24 +26,71 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool, queries: db.New(pool)}
 }
 
-// Transact runs fn against a Store bound to one transaction. Committing or rolling
-// back is Transact's job; fn only returns whether its work succeeded.
-func (s *Store) Transact(ctx context.Context, fn func(ctx context.Context, tx reminderStore) error) error {
+// begin opens a transaction and returns a Store bound to it. The three Transact
+// methods below differ only in which consumer interface they hand fn, so the
+// begin/commit knowledge lives here once; a shared generic version would have to
+// assert *Store into the interface at runtime, trading a compile-time guarantee for
+// three fewer lines.
+func (s *Store) begin(ctx context.Context) (pgx.Tx, *Store, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("beginning tx: %w", err)
+		return nil, nil, fmt.Errorf("beginning tx: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	return tx, &Store{pool: s.pool, queries: s.queries.WithTx(tx)}, nil
+}
 
-	txStore := &Store{pool: s.pool, queries: s.queries.WithTx(tx)}
-	if err := fn(ctx, txStore); err != nil {
-		return err
-	}
-
+func commit(ctx context.Context, tx pgx.Tx) error {
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing tx: %w", err)
 	}
 	return nil
+}
+
+// Transact runs fn against a Store bound to one transaction. Committing or rolling
+// back is Transact's job; fn only returns whether its work succeeded.
+func (s *Store) Transact(ctx context.Context, fn func(ctx context.Context, tx reminderStore) error) error {
+	tx, txStore, err := s.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := fn(ctx, txStore); err != nil {
+		return err
+	}
+	return commit(ctx, tx)
+}
+
+// TransactSignups is Transact for Signups. A signup write and the notification it
+// produces have to land together: a row deleted out of a locked comp with no
+// COMP_SLOT_DROPPED behind it is a hole nobody is told about.
+func (s *Store) TransactSignups(ctx context.Context, fn func(ctx context.Context, tx signupStore) error) error {
+	tx, txStore, err := s.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := fn(ctx, txStore); err != nil {
+		return err
+	}
+	return commit(ctx, tx)
+}
+
+// TransactLate is Transact for LateRequests. Same reason, plus one of its own:
+// Approve reads a request's state and then decides it, and those two have to be one
+// step or two raid leads racing the same button both get past the guard.
+func (s *Store) TransactLate(ctx context.Context, fn func(ctx context.Context, tx lateStore) error) error {
+	tx, txStore, err := s.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := fn(ctx, txStore); err != nil {
+		return err
+	}
+	return commit(ctx, tx)
 }
 
 // CreateEvent inserts the event and its initial job schedule in one transaction, so
@@ -181,20 +228,55 @@ func eventFromRow(row db.Event) Event {
 	}
 }
 
-func (s *Store) UpsertSignup(ctx context.Context, in SignupWrite) (Signup, error) {
+// UpsertSignup writes the signup and, when the new status leaves the assignment pool,
+// deletes whatever comp slots the character held. It returns the comps it emptied so
+// the caller can tell the raid lead.
+//
+// No transaction of its own: both callers run inside TransactSignups or TransactLate,
+// and opening one here would take a second connection and commit the write
+// independently of the notification that reports it.
+//
+// The eviction lives here rather than in Signups.Write because LateRequests.Approve
+// replays a stored status straight into the store: a request carrying DECLINED,
+// approved after the comp locked, would otherwise leave a seat behind.
+func (s *Store) UpsertSignup(ctx context.Context, in SignupWrite) (Signup, []string, error) {
 	row, err := s.queries.UpsertSignup(ctx, db.UpsertSignupParams{
 		ID:      db.NewID(),
 		EventID: in.EventID, CharacterID: in.CharacterID, Status: in.Status, Note: in.Note,
 		LateUntil: timestamptzFromPtr(in.LateUntil),
 	})
 	if err != nil {
-		return Signup{}, err
+		return Signup{}, nil, err
 	}
-	return signupFromRow(row), nil
+
+	// Unconditional: the query itself decides, by reading back the status just
+	// written, so the pool rule lives in one place (see its comment).
+	droppedFrom, err := s.queries.DropCompSlotsForCharacter(ctx, db.DropCompSlotsForCharacterParams{
+		EventID: in.EventID, CharacterID: in.CharacterID,
+	})
+	if err != nil {
+		return Signup{}, nil, fmt.Errorf("dropping comp slots: %w", err)
+	}
+	return signupFromRow(row), droppedFrom, nil
 }
 
-func (s *Store) DeleteSignup(ctx context.Context, eventID, characterID uuid.UUID) error {
-	return s.queries.DeleteSignup(ctx, db.DeleteSignupParams{EventID: eventID, CharacterID: characterID})
+// DeleteSignup removes the signup and the comp slots that went with it, returning the
+// comps it emptied. With the row gone the pool test in DropCompSlotsForCharacter finds
+// no signup at all, which is the strongest form of "not in the pool".
+//
+// No transaction of its own, for the same reason UpsertSignup has none: the caller owns
+// the boundary, and the notification belongs inside it.
+func (s *Store) DeleteSignup(ctx context.Context, eventID, characterID uuid.UUID) ([]string, error) {
+	if err := s.queries.DeleteSignup(ctx, db.DeleteSignupParams{EventID: eventID, CharacterID: characterID}); err != nil {
+		return nil, err
+	}
+	droppedFrom, err := s.queries.DropCompSlotsForCharacter(ctx, db.DropCompSlotsForCharacterParams{
+		EventID: eventID, CharacterID: characterID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("dropping comp slots: %w", err)
+	}
+	return droppedFrom, nil
 }
 
 func (s *Store) ListSignupsForEvent(ctx context.Context, eventID uuid.UUID) ([]Signup, error) {

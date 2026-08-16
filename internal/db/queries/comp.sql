@@ -1,6 +1,6 @@
 -- name: ListAssignmentPoolForEvent :many
--- Confirmed and late signups only; declined, tentative, bench, absent, and no-show
--- never reach the assigner.
+-- Confirmed and late signups only; declined, tentative, absent, and no-show never
+-- reach the assigner.
 SELECT
     s.character_id,
     c.name,
@@ -47,6 +47,28 @@ WHERE event_id = $1 AND name = $2;
 -- name: DeleteCompSlots :exec
 DELETE FROM comp_slots
 WHERE event_id = $1 AND comp_name = $2;
+
+-- name: DropCompSlotsForCharacter :many
+-- A signup that leaves the assignment pool takes its seats with it. Without this the
+-- locked comp keeps a slot for someone who has said they are not coming, and
+-- CountCompSlotsForEvent still reads the event as locked.
+--
+-- The pool test is written here rather than in Go so it stays next to the one in
+-- ListAssignmentPoolForEvent above: two definitions of "holds a seat" that drift are
+-- how a raider ends up assigned and absent at once. Run it after the upsert, in the
+-- same transaction, and it reads back the status just written.
+--
+-- One row per comp the character was in, never more: comp_slots is unique on
+-- (event_id, comp_name, character_id), so nobody holds two seats in one comp.
+DELETE FROM comp_slots cs
+WHERE cs.event_id = $1 AND cs.character_id = $2
+  AND NOT EXISTS (
+      SELECT 1 FROM signups s
+      WHERE s.event_id = cs.event_id
+        AND s.character_id = cs.character_id
+        AND s.status IN ('CONFIRMED', 'LATE')
+  )
+RETURNING cs.comp_name;
 
 -- name: InsertCompSlot :exec
 INSERT INTO comp_slots (id, event_id, comp_name, character_id, role, slot_index, is_bench, reason)

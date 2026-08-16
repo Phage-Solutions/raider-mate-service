@@ -99,6 +99,13 @@ Violating these produces broken behaviour, not just untidy code.
 
     Report the actual output. "Tests pass" without having run them since the last
     edit is a false statement about the state of the repo, not an optimistic one.
+11. **Update CHANGELOG.md in the same change as any added feature, removal, or
+    bugfix.** Add the entry under `## [Unreleased]`, in the right Keep a Changelog
+    section (`Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`). The
+    release workflow reads the section matching the pushed tag as the GitHub Release
+    body; a tag with no matching section fails the release. Write for the bot and
+    dashboard maintainers reading it, not for git history: state what changed in
+    domain terms, and why if it is not obvious from the what.
 
 ## Structure
 
