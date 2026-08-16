@@ -77,9 +77,10 @@ type DropCompSlotsForCharacterParams struct {
 //
 // The pool test is written here rather than in Go so it stays next to the one in
 // ListAssignmentPoolForEvent above: two definitions of "holds a seat" that drift are
-// how a raider ends up assigned and absent at once. Run this after the upsert and it
-// reads the status just written; run it with no signup row at all and it drops the
-// slots too, which is what a withdrawal means.
+// how a raider ends up assigned and absent at once. Run it in the same transaction as
+// the write it follows: after an upsert it reads back the status just written, and
+// after a delete it finds no signup at all, which is the strongest form of not in the
+// pool and is what a withdrawal means.
 //
 // One row per comp the character was in, never more: comp_slots is unique on
 // (event_id, comp_name, character_id), so nobody holds two seats in one comp.
