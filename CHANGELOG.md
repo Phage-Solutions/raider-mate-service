@@ -12,6 +12,8 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-16
+
 ### Added
 
 - Events carry a `reminder_lead_minutes`: how long before the start the pre-event
