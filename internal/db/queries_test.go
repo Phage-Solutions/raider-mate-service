@@ -325,3 +325,164 @@ func TestSetCharacterMainIgnoresAForeignGuild(t *testing.T) {
 		t.Error("is_main = false, want the flag flipped by the owning guild's write")
 	}
 }
+
+func TestCreateCharacterGrantsMainOnlyToFirst(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 30, DiscordGuildID: 100})
+	if err != nil {
+		t.Fatalf("upserting user: %v", err)
+	}
+
+	// Every registration asks for main, which is what raider-mate-bot does on every
+	// /character add. Only the first may have it: the alts must not take the flag off
+	// the character holding it, and must not trip characters_one_main_per_user either.
+	names := []string{"Danthrax", "Kelthuz", "Zugzug"}
+	want := []bool{true, false, false}
+
+	for i, name := range names {
+		character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+			ID:     NewID(),
+			UserID: user.ID, Name: name, Realm: "Draenor", Region: "eu", IsMain: true,
+		})
+		if err != nil {
+			t.Fatalf("creating %s: %v", name, err)
+		}
+		if character.IsMain != want[i] {
+			t.Errorf("%s is_main = %v, want %v", name, character.IsMain, want[i])
+		}
+	}
+}
+
+func TestCreateCharacterRejectsDuplicateIdentity(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 31, DiscordGuildID: 100})
+	if err != nil {
+		t.Fatalf("upserting user: %v", err)
+	}
+
+	create := func() error {
+		_, err := q.CreateCharacter(ctx, CreateCharacterParams{
+			ID:     NewID(),
+			UserID: user.ID, Name: "Danthrax", Realm: "Draenor", Region: "eu", IsMain: true,
+		})
+		return err
+	}
+
+	if err := create(); err != nil {
+		t.Fatalf("first registration: %v", err)
+	}
+
+	// The constraint name is asserted because the store maps this one, and only this
+	// one, to roster.ErrCharacterExists and a 409.
+	err = create()
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		t.Fatalf("second registration: got %v, want unique_violation", err)
+	}
+	if pgErr.ConstraintName != "characters_user_id_name_realm_region_key" {
+		t.Errorf("violated constraint = %s, want characters_user_id_name_realm_region_key", pgErr.ConstraintName)
+	}
+}
+
+func TestSetCharacterMainSwitchesEitherDirection(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 32, DiscordGuildID: 100})
+	if err != nil {
+		t.Fatalf("upserting user: %v", err)
+	}
+
+	create := func(name string) Character {
+		t.Helper()
+		c, err := q.CreateCharacter(ctx, CreateCharacterParams{
+			ID:     NewID(),
+			UserID: user.ID, Name: name, Realm: "Draenor", Region: "eu", IsMain: true,
+		})
+		if err != nil {
+			t.Fatalf("creating %s: %v", name, err)
+		}
+		return c
+	}
+
+	// first holds main by registration order; second is the alt.
+	first := create("Danthrax")
+	second := create("Kelthuz")
+
+	// The pair the store runs inside one transaction. Both directions are exercised
+	// because a single-statement demote-and-promote passes one way and violates
+	// characters_one_main_per_user the other, depending on heap scan order.
+	promote := func(target Character) {
+		t.Helper()
+		if err := q.ClearMainForCharacterOwner(ctx, ClearMainForCharacterOwnerParams{
+			ID: target.ID, DiscordGuildID: 100,
+		}); err != nil {
+			t.Fatalf("clearing main before promoting %s: %v", target.Name, err)
+		}
+		rows, err := q.SetCharacterMain(ctx, SetCharacterMainParams{
+			ID: target.ID, DiscordGuildID: 100, IsMain: true,
+		})
+		if err != nil {
+			t.Fatalf("promoting %s: %v", target.Name, err)
+		}
+		if rows != 1 {
+			t.Fatalf("promoting %s affected %d rows, want 1", target.Name, rows)
+		}
+	}
+
+	assertMain := func(want Character, other Character) {
+		t.Helper()
+		for _, c := range []Character{want, other} {
+			got, err := q.GetCharacterInGuild(ctx, GetCharacterInGuildParams{ID: c.ID, DiscordGuildID: 100})
+			if err != nil {
+				t.Fatalf("reading %s: %v", c.Name, err)
+			}
+			if wantMain := c.ID == want.ID; got.IsMain != wantMain {
+				t.Errorf("%s is_main = %v, want %v", c.Name, got.IsMain, wantMain)
+			}
+		}
+	}
+
+	promote(second)
+	assertMain(second, first)
+
+	promote(first)
+	assertMain(first, second)
+}
+
+func TestClearMainForCharacterOwnerIgnoresForeignGuild(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 33, DiscordGuildID: 100})
+	if err != nil {
+		t.Fatalf("upserting user: %v", err)
+	}
+	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
+		UserID: user.ID, Name: "Danthrax", Realm: "Draenor", Region: "eu", IsMain: true,
+	})
+	if err != nil {
+		t.Fatalf("creating character: %v", err)
+	}
+
+	// The subquery finds nothing for another guild, so the demote must be a no-op
+	// rather than clearing the flag on a roster the caller cannot see.
+	if err := q.ClearMainForCharacterOwner(ctx, ClearMainForCharacterOwnerParams{
+		ID: character.ID, DiscordGuildID: 999,
+	}); err != nil {
+		t.Fatalf("clearing main from a foreign guild: %v", err)
+	}
+
+	got, err := q.GetCharacterInGuild(ctx, GetCharacterInGuildParams{ID: character.ID, DiscordGuildID: 100})
+	if err != nil {
+		t.Fatalf("reading character: %v", err)
+	}
+	if !got.IsMain {
+		t.Error("is_main = false, want the flag untouched by a foreign guild's write")
+	}
+}

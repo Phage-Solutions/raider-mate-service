@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -149,23 +150,53 @@ func numericToFloat64(n pgtype.Numeric) (float64, error) {
 	return f.Float64, nil
 }
 
-func (s *Store) UpsertUser(ctx context.Context, discordID, discordGuildID int64) (uuid.UUID, error) {
-	user, err := s.queries.UpsertUser(ctx, db.UpsertUserParams{ID: db.NewID(), DiscordID: discordID, DiscordGuildID: discordGuildID})
+// RegisterCharacter creates the owning user and the character together. One
+// transaction because a failure between the two leaves a user row owning nothing,
+// which the next registration would silently reuse and no code path ever cleans up.
+func (s *Store) RegisterCharacter(ctx context.Context, in RegisterInput) (Character, error) {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return uuid.Nil, err
+		return Character{}, fmt.Errorf("beginning tx: %w", err)
 	}
-	return user.ID, nil
-}
+	defer tx.Rollback(ctx) //nolint:errcheck
 
-func (s *Store) CreateCharacter(ctx context.Context, userID uuid.UUID, in RegisterInput) (Character, error) {
-	row, err := s.queries.CreateCharacter(ctx, db.CreateCharacterParams{
-		ID:     db.NewID(),
-		UserID: userID, Name: in.Name, Realm: in.Realm, Region: in.Region, IsMain: in.IsMain,
+	q := s.queries.WithTx(tx)
+
+	user, err := q.UpsertUser(ctx, db.UpsertUserParams{
+		ID: db.NewID(), DiscordID: in.DiscordID, DiscordGuildID: in.DiscordGuildID,
 	})
+	if err != nil {
+		return Character{}, fmt.Errorf("upserting user: %w", err)
+	}
+
+	row, err := q.CreateCharacter(ctx, db.CreateCharacterParams{
+		ID:     db.NewID(),
+		UserID: user.ID, Name: in.Name, Realm: in.Realm, Region: in.Region, IsMain: in.IsMain,
+	})
+	if err != nil {
+		if isUniqueViolation(err, "characters_user_id_name_realm_region_key") {
+			return Character{}, ErrCharacterExists
+		}
+		return Character{}, fmt.Errorf("creating character: %w", err)
+	}
+
+	character, err := characterFromRow(row)
 	if err != nil {
 		return Character{}, err
 	}
-	return characterFromRow(row)
+
+	if err := tx.Commit(ctx); err != nil {
+		return Character{}, fmt.Errorf("committing tx: %w", err)
+	}
+	return character, nil
+}
+
+// isUniqueViolation reports whether err is Postgres 23505 against a named constraint.
+// The constraint name is part of the check on purpose: characters carries two unique
+// indexes and they mean different things to the caller.
+func isUniqueViolation(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
 }
 
 func (s *Store) GetCharacterInGuild(ctx context.Context, characterID uuid.UUID, discordGuildID int64) (Character, error) {
@@ -194,12 +225,39 @@ func (s *Store) DeleteCharacter(ctx context.Context, characterID uuid.UUID, disc
 	return rows > 0, nil
 }
 
+// SetCharacterMain moves the main flag, which is the dashboard's "switch mains". The
+// demote and the promote are two statements in one transaction because
+// characters_one_main_per_user is a partial unique index and Postgres has no partial
+// unique constraint to defer: doing both in one UPDATE, or in a data-modifying CTE,
+// violates the index depending on which row the scan reaches first.
 func (s *Store) SetCharacterMain(ctx context.Context, characterID uuid.UUID, discordGuildID int64, isMain bool) (bool, error) {
-	rows, err := s.queries.SetCharacterMain(ctx, db.SetCharacterMainParams{
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("beginning tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	q := s.queries.WithTx(tx)
+
+	// Only when promoting. Demoting is the raider giving up a main without naming a
+	// replacement, and clearing first would make that a no-op against itself.
+	if isMain {
+		if err := q.ClearMainForCharacterOwner(ctx, db.ClearMainForCharacterOwnerParams{
+			ID: characterID, DiscordGuildID: discordGuildID,
+		}); err != nil {
+			return false, fmt.Errorf("clearing current main: %w", err)
+		}
+	}
+
+	rows, err := q.SetCharacterMain(ctx, db.SetCharacterMainParams{
 		ID: characterID, DiscordGuildID: discordGuildID, IsMain: isMain,
 	})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("setting main: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("committing tx: %w", err)
 	}
 	return rows > 0, nil
 }

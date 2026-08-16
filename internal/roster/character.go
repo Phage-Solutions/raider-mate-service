@@ -45,8 +45,7 @@ type RegisterInput struct {
 // characterStore is the persistence Characters needs. Declared here, by the
 // consumer.
 type characterStore interface {
-	UpsertUser(ctx context.Context, discordID, discordGuildID int64) (uuid.UUID, error)
-	CreateCharacter(ctx context.Context, userID uuid.UUID, in RegisterInput) (Character, error)
+	RegisterCharacter(ctx context.Context, in RegisterInput) (Character, error)
 	GetCharacterInGuild(ctx context.Context, characterID uuid.UUID, discordGuildID int64) (Character, error)
 	GetCharacterOwner(ctx context.Context, characterID uuid.UUID, discordGuildID int64) (int64, error)
 	DeleteCharacter(ctx context.Context, characterID uuid.UUID, discordGuildID int64) (bool, error)
@@ -74,14 +73,18 @@ func NewCharacters(store characterStore) *Characters {
 // Register creates a character, upserting the owning user first. A new character
 // has no ilvl until the next worker sync tick (hard rule 5 forbids calling
 // Raider.IO from this request handler); Character.Synced reports that honestly.
+//
+// RegisterInput.IsMain is a request, not an instruction. It is granted only while the
+// raider has no main yet, so registering an alt never takes the flag off the character
+// that holds it. Moving it is SetMain. Registering the same name, realm and region
+// twice returns ErrCharacterExists rather than a constraint error.
 func (c *Characters) Register(ctx context.Context, in RegisterInput) (Character, error) {
-	userID, err := c.store.UpsertUser(ctx, in.DiscordID, in.DiscordGuildID)
+	character, err := c.store.RegisterCharacter(ctx, in)
 	if err != nil {
-		return Character{}, fmt.Errorf("upserting user: %w", err)
-	}
-	character, err := c.store.CreateCharacter(ctx, userID, in)
-	if err != nil {
-		return Character{}, fmt.Errorf("creating character: %w", err)
+		if errors.Is(err, ErrCharacterExists) {
+			return Character{}, err
+		}
+		return Character{}, fmt.Errorf("registering character: %w", err)
 	}
 	return character, nil
 }
@@ -145,6 +148,11 @@ func (c *Characters) ListForUser(ctx context.Context, discordID, discordGuildID 
 // never existed or lives in another guild is deliberately not distinguished.
 var ErrCharacterNotFound = errors.New("character not found")
 
+// ErrCharacterExists means this raider already registered that name, realm and region.
+// A caller retyping a character they already have is a mistake worth naming, not an
+// infrastructure failure: the handler turns it into a 409 the raider can act on.
+var ErrCharacterExists = errors.New("character already registered")
+
 // Delete removes a character. character_roles, signups, comp_slots, snapshots and
 // late requests all carry ON DELETE CASCADE, so this takes the raider's history with
 // it: it is for a mistyped registration, not for a raider leaving.
@@ -159,9 +167,11 @@ func (c *Characters) Delete(ctx context.Context, characterID uuid.UUID, discordG
 	return nil
 }
 
-// SetMain flags which character is the raider's main. Nothing enforces one main per
-// raider: an alt-heavy roster routinely has none, and the flag is a display hint, not
-// a constraint the assigner reads.
+// SetMain moves the main flag, and is how a raider switches mains from the dashboard.
+// One main per raider is enforced by characters_one_main_per_user, so promoting demotes
+// whoever held it; a raider with no main at all is still fine, since the index is
+// partial. Registration cannot move the flag (see Register), which leaves this the only
+// way it changes hands.
 func (c *Characters) SetMain(ctx context.Context, characterID uuid.UUID, discordGuildID int64, isMain bool) error {
 	updated, err := c.store.SetCharacterMain(ctx, characterID, discordGuildID, isMain)
 	if err != nil {

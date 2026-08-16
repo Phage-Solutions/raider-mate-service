@@ -12,9 +12,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearMainForCharacterOwner = `-- name: ClearMainForCharacterOwner :exec
+UPDATE characters SET is_main = false
+WHERE is_main
+  AND user_id = (
+      SELECT c.user_id FROM characters c
+      JOIN users u ON u.id = c.user_id
+      WHERE c.id = $1 AND u.discord_guild_id = $2
+  )
+`
+
+type ClearMainForCharacterOwnerParams struct {
+	ID             uuid.UUID
+	DiscordGuildID int64
+}
+
+// Demotes whichever character currently holds main for the owner of $1. Its own
+// statement because characters_one_main_per_user is a partial unique index, and
+// Postgres cannot defer one: a single UPDATE that demotes and promotes in one pass
+// violates it whenever the scan reaches the promoted row first, which makes the bug
+// depend on heap order rather than on the data. Run this and SetCharacterMain inside
+// one transaction. A character in another guild matches nothing, so the subquery
+// returning NULL is the guild scoping.
+func (q *Queries) ClearMainForCharacterOwner(ctx context.Context, arg ClearMainForCharacterOwnerParams) error {
+	_, err := q.db.Exec(ctx, clearMainForCharacterOwner, arg.ID, arg.DiscordGuildID)
+	return err
+}
+
 const createCharacter = `-- name: CreateCharacter :one
 INSERT INTO characters (id, user_id, name, realm, region, is_main)
-VALUES ($1, $2, $3, $4, $5, $6)
+SELECT
+    $1, $2, $3, $4, $5,
+    $6::boolean
+        AND NOT EXISTS (
+            SELECT 1 FROM characters x WHERE x.user_id = $2 AND x.is_main
+        )
 RETURNING id, user_id, name, realm, class, spec, ilvl, mplus_score, last_synced, is_main, region, sync_attempted_at
 `
 
@@ -27,6 +59,11 @@ type CreateCharacterParams struct {
 	IsMain bool
 }
 
+// is_main is decided here rather than taken from the caller. "My main" is a fact about
+// the whole roster, not about the row being written, and a client that sends true on
+// every registration would have each new alt steal the flag from the character that
+// holds it. The caller's value is a request, granted only while the raider has no main
+// yet; moving it afterwards is SetCharacterMain, which demotes the old one first.
 func (q *Queries) CreateCharacter(ctx context.Context, arg CreateCharacterParams) (Character, error) {
 	row := q.db.QueryRow(ctx, createCharacter,
 		arg.ID,

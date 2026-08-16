@@ -124,7 +124,10 @@ type createCharacterRequest struct {
 	Name   string `json:"name"`
 	Realm  string `json:"realm"`
 	Region string `json:"region"`
-	IsMain bool   `json:"is_main"`
+	// IsMain asks for the main flag; the service grants it only while the raider has
+	// no main yet. A client that sends true on every registration is therefore safe,
+	// and PATCH /api/characters/{cid} is what moves the flag afterwards.
+	IsMain bool `json:"is_main"`
 }
 
 // createCharacterHandler registers a character for the calling actor. A new
@@ -155,6 +158,12 @@ func createCharacterHandler(characters *roster.Characters, logger *slog.Logger) 
 			IsMain:         body.IsMain,
 		})
 		if err != nil {
+			// A retyped registration is the raider's mistake, not the service's, so it
+			// gets a message the bot is allowed to show instead of "internal error".
+			if errors.Is(err, roster.ErrCharacterExists) {
+				writeError(w, logger, http.StatusConflict, "you already registered that character")
+				return
+			}
 			logger.ErrorContext(r.Context(), "registering character", "error", err)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
 			return

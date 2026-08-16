@@ -9,8 +9,18 @@ SELECT * FROM users
 WHERE discord_id = $1 AND discord_guild_id = $2;
 
 -- name: CreateCharacter :one
+-- is_main is decided here rather than taken from the caller. "My main" is a fact about
+-- the whole roster, not about the row being written, and a client that sends true on
+-- every registration would have each new alt steal the flag from the character that
+-- holds it. The caller's value is a request, granted only while the raider has no main
+-- yet; moving it afterwards is SetCharacterMain, which demotes the old one first.
 INSERT INTO characters (id, user_id, name, realm, region, is_main)
-VALUES ($1, $2, $3, $4, $5, $6)
+SELECT
+    sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(name), sqlc.arg(realm), sqlc.arg(region),
+    sqlc.arg(is_main)::boolean
+        AND NOT EXISTS (
+            SELECT 1 FROM characters x WHERE x.user_id = sqlc.arg(user_id) AND x.is_main
+        )
 RETURNING *;
 
 -- name: GetCharacterInGuild :one
@@ -33,6 +43,22 @@ WHERE c.id = $1 AND u.discord_guild_id = $2;
 DELETE FROM characters c
 USING users u
 WHERE c.user_id = u.id AND c.id = $1 AND u.discord_guild_id = $2;
+
+-- name: ClearMainForCharacterOwner :exec
+-- Demotes whichever character currently holds main for the owner of $1. Its own
+-- statement because characters_one_main_per_user is a partial unique index, and
+-- Postgres cannot defer one: a single UPDATE that demotes and promotes in one pass
+-- violates it whenever the scan reaches the promoted row first, which makes the bug
+-- depend on heap order rather than on the data. Run this and SetCharacterMain inside
+-- one transaction. A character in another guild matches nothing, so the subquery
+-- returning NULL is the guild scoping.
+UPDATE characters SET is_main = false
+WHERE is_main
+  AND user_id = (
+      SELECT c.user_id FROM characters c
+      JOIN users u ON u.id = c.user_id
+      WHERE c.id = $1 AND u.discord_guild_id = $2
+  );
 
 -- name: SetCharacterMain :execrows
 -- Same guild scoping and the same reason for :execrows. Only is_main is settable:

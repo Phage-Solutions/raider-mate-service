@@ -12,6 +12,30 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-16
+
+### Fixed
+
+- Registering a second character no longer fails. `is_main` on
+  `POST /api/guilds/{gid}/characters` is now decided by the service and granted only
+  while the raider has no main yet, instead of being written straight through to a
+  column guarded by a one-main-per-raider unique index. A client that sends
+  `is_main: true` on every registration, which is what raider-mate-bot does, is
+  therefore safe: the first character becomes the main and later ones do not take the
+  flag from it. Every registration after a raider's first previously returned 500.
+- `PATCH /api/characters/{cid}` with `is_main: true` now demotes the current main
+  before promoting the new one, so switching mains works. It previously returned 500
+  whenever the raider already had a main, which is every case worth switching from.
+  The dashboard's switch-mains flow depends on this.
+- Re-registering a character the raider already has returns 409 with a message meant
+  for a player, instead of 500 and "internal error". The bot shows a service message
+  only below 500, so this reached raiders as "the roster service is having a bad time".
+
+### Changed
+
+- Registration writes the user and the character in one transaction. A failure between
+  the two previously left a user row owning no characters, which nothing cleaned up.
+
 ## [0.1.0] - 2026-08-16
 
 Initial release: signups with multi-role, one comp view, reminders, and the API

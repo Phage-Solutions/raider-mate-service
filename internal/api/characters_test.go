@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -28,13 +29,15 @@ type fakeCharacterStore struct {
 	deleted  bool
 	mainSet  *bool
 	notFound bool
+	// exists makes RegisterCharacter report the raider already has this name, realm
+	// and region, which the real store maps from a 23505 on the unique index.
+	exists bool
 }
 
-func (f *fakeCharacterStore) UpsertUser(context.Context, int64, int64) (uuid.UUID, error) {
-	return uuid.Nil, nil
-}
-
-func (f *fakeCharacterStore) CreateCharacter(context.Context, uuid.UUID, roster.RegisterInput) (roster.Character, error) {
+func (f *fakeCharacterStore) RegisterCharacter(context.Context, roster.RegisterInput) (roster.Character, error) {
+	if f.exists {
+		return roster.Character{}, roster.ErrCharacterExists
+	}
 	return f.character, nil
 }
 
@@ -309,5 +312,52 @@ func TestLookupCharacterOmitsAnUnknownID(t *testing.T) {
 
 	if got := lookupCharacter(byID, uuid.New()); got != nil {
 		t.Errorf("summary = %v, want nil rather than an invented name", got)
+	}
+}
+
+// guildCharacterRequest builds a request with {gid} already resolved, as the mux would.
+func guildCharacterRequest(method, target string, actor Actor, body string) *http.Request {
+	r := requestAs(method, target, actor, body)
+	r.SetPathValue("gid", strconv.FormatInt(homeGuild, 10))
+	return r
+}
+
+func TestCreateCharacterReportsARetypedRegistration(t *testing.T) {
+	store, characters, _ := newCharacterFixture(1)
+	store.exists = true
+	w := httptest.NewRecorder()
+
+	createCharacterHandler(characters, testLogger())(w, guildCharacterRequest(
+		http.MethodPost, "/api/guilds/1/characters", homeActor(false),
+		`{"name":"Danthrax","realm":"Draenor","region":"eu","is_main":true}`))
+
+	// 409 and not 500: raider-mate-bot shows an APIError's message only when the
+	// status is below 500, so a 500 here reaches the raider as "the roster service is
+	// having a bad time" and tells them nothing they can act on.
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d, body %s", w.Code, http.StatusConflict, w.Body)
+	}
+	if !strings.Contains(w.Body.String(), "already registered") {
+		t.Errorf("body = %s, want a message the bot can pass through to Discord", w.Body)
+	}
+}
+
+func TestCreateCharacterReturnsTheRegisteredCharacter(t *testing.T) {
+	_, characters, id := newCharacterFixture(1)
+	w := httptest.NewRecorder()
+
+	createCharacterHandler(characters, testLogger())(w, guildCharacterRequest(
+		http.MethodPost, "/api/guilds/1/characters", homeActor(false),
+		`{"name":"Thrall","realm":"Draenor","region":"eu","is_main":true}`))
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d, body %s", w.Code, http.StatusCreated, w.Body)
+	}
+	var got characterResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding body: %v", err)
+	}
+	if got.ID != id.String() {
+		t.Errorf("id = %s, want %s", got.ID, id)
 	}
 }
