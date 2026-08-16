@@ -12,6 +12,28 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-16
+
+### Added
+
+- `raiderio_url` on every character shape the API returns: the full character resource
+  and the summary embedded in signup rows and comp slots. It is the character's
+  Raider.IO page, so the bot can link a raider's name straight from an event embed
+  without rebuilding the URL from fields the summary does not carry. It is a plain
+  field rather than a `_links` entry, because a missing link means "unavailable to you
+  right now" and this page is always available.
+- `RAIDERIO_ACCESS_KEY` on the worker, sent with every Raider.IO request. Register an
+  application at https://raider.io/settings/apps to raise the request rate above what
+  anonymous access allows. Optional: with no key the worker syncs anonymously, exactly
+  as it did before.
+
+### Security
+
+- The Raider.IO access key is kept out of the worker's logs. Raider.IO takes the key as
+  a query parameter, and a failed request's error prints the URL it failed on, so a
+  transport error would otherwise have written the key to the log stream on every
+  network blip.
+
 ## [0.1.1] - 2026-08-16
 
 ### Fixed

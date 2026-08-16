@@ -15,6 +15,7 @@ type Config struct {
 	SyncStaleAfter      time.Duration
 	SyncBatch           int32
 	RaiderIOBaseURL     string
+	RaiderIOAccessKey   string
 	RaiderIOMinInterval time.Duration
 	JobPollInterval     time.Duration
 	JobBatch            int32
@@ -66,6 +67,10 @@ func loadConfig() (Config, error) {
 
 	raiderIOBaseURL := os.Getenv("RAIDERIO_BASE_URL")
 
+	// Optional. Without it the worker syncs anonymously, which Raider.IO allows at a
+	// lower request rate. A self-hoster with a small roster never needs one.
+	raiderIOAccessKey := os.Getenv("RAIDERIO_ACCESS_KEY")
+
 	jobPollInterval, err := envDuration("JOB_POLL_INTERVAL", 30*time.Second)
 	if err != nil {
 		return Config{}, err
@@ -88,6 +93,7 @@ func loadConfig() (Config, error) {
 		SyncStaleAfter:      syncStaleAfter,
 		SyncBatch:           syncBatch,
 		RaiderIOBaseURL:     raiderIOBaseURL,
+		RaiderIOAccessKey:   raiderIOAccessKey,
 		RaiderIOMinInterval: raiderIOMinInterval,
 		JobPollInterval:     jobPollInterval,
 		JobBatch:            jobBatch,

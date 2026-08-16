@@ -44,7 +44,7 @@ func run() error {
 	}
 	defer pool.Close()
 
-	client := raiderio.NewClient(cfg.RaiderIOBaseURL, cfg.RaiderIOMinInterval)
+	client := raiderio.NewClient(cfg.RaiderIOBaseURL, cfg.RaiderIOAccessKey, cfg.RaiderIOMinInterval)
 	store := roster.NewStore(pool)
 	syncer := roster.NewSyncer(client, store, logger)
 
@@ -58,6 +58,9 @@ func run() error {
 		"sync_batch", cfg.SyncBatch,
 		"job_poll_interval", cfg.JobPollInterval,
 		"job_batch", cfg.JobBatch,
+		// Whether, never which. "am I keyed?" is the first question when Raider.IO
+		// starts answering 429, and the key itself must not reach a log line.
+		"raiderio_keyed", cfg.RaiderIOAccessKey != "",
 	)
 
 	tick := func() {

@@ -9,21 +9,26 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Phage-Solutions/raider-mate-service/internal/raiderio"
 	"github.com/Phage-Solutions/raider-mate-service/internal/roster"
 )
 
 type characterResponse struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	Realm      string   `json:"realm"`
-	Region     string   `json:"region"`
-	Class      *string  `json:"class,omitempty"`
-	Spec       *string  `json:"spec,omitempty"`
-	Ilvl       *float64 `json:"ilvl,omitempty"`
-	MplusScore *float64 `json:"mplus_score,omitempty"`
-	IsMain     bool     `json:"is_main"`
-	Synced     bool     `json:"synced"`
-	Links      Links    `json:"_links"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Realm string `json:"realm"`
+	// RaiderIOURL is reference data, not a transition, so it is a plain field rather
+	// than a _links entry: an absent link means "not available to you right now", and
+	// this page is available to everyone always.
+	RaiderIOURL string   `json:"raiderio_url"`
+	Region      string   `json:"region"`
+	Class       *string  `json:"class,omitempty"`
+	Spec        *string  `json:"spec,omitempty"`
+	Ilvl        *float64 `json:"ilvl,omitempty"`
+	MplusScore  *float64 `json:"mplus_score,omitempty"`
+	IsMain      bool     `json:"is_main"`
+	Synced      bool     `json:"synced"`
+	Links       Links    `json:"_links"`
 }
 
 // characterToResponse renders one character. The two flags gate different links,
@@ -42,17 +47,18 @@ func characterToResponse(c roster.Character, owned, isRaidLead bool) characterRe
 	links.add(owned || isRaidLead, "delete", href, "DELETE")
 
 	return characterResponse{
-		ID:         c.ID.String(),
-		Name:       c.Name,
-		Realm:      c.Realm,
-		Region:     c.Region,
-		Class:      c.Class,
-		Spec:       c.Spec,
-		Ilvl:       c.Ilvl,
-		MplusScore: c.MplusScore,
-		IsMain:     c.IsMain,
-		Synced:     c.Synced,
-		Links:      links,
+		ID:          c.ID.String(),
+		Name:        c.Name,
+		Realm:       c.Realm,
+		RaiderIOURL: raiderio.ProfileURL(c.Region, c.Realm, c.Name),
+		Region:      c.Region,
+		Class:       c.Class,
+		Spec:        c.Spec,
+		Ilvl:        c.Ilvl,
+		MplusScore:  c.MplusScore,
+		IsMain:      c.IsMain,
+		Synced:      c.Synced,
+		Links:       links,
 	}
 }
 
@@ -60,12 +66,16 @@ func characterToResponse(c roster.Character, owned, isRaidLead bool) characterRe
 // resource: a signup row, a comp slot. Enough to draw the line without a second
 // request, and no links of its own, since the full character resource carries those.
 type characterSummary struct {
-	ID    string   `json:"id"`
-	Name  string   `json:"name"`
-	Realm string   `json:"realm"`
-	Class *string  `json:"class,omitempty"`
-	Spec  *string  `json:"spec,omitempty"`
-	Ilvl  *float64 `json:"ilvl,omitempty"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Realm string `json:"realm"`
+	// RaiderIOURL saves the bot reconstructing the link per row from fields this
+	// shape does not even carry: region is part of the character's identity but not
+	// of how it renders, so it stays out of the summary while its URL rides along.
+	RaiderIOURL string   `json:"raiderio_url"`
+	Class       *string  `json:"class,omitempty"`
+	Spec        *string  `json:"spec,omitempty"`
+	Ilvl        *float64 `json:"ilvl,omitempty"`
 	// Roles is the character's whole menu, in priority order. It rides along because
 	// the bot's embed needs it on every row: the flex marker beside a name, and the
 	// grouping of signups by what each raider can play before a comp is locked. One
@@ -82,7 +92,8 @@ func characterSummaries(list []roster.Character, roles map[uuid.UUID][]roster.Ro
 	for _, c := range list {
 		out[c.ID] = characterSummary{
 			ID: c.ID.String(), Name: c.Name, Realm: c.Realm,
-			Class: c.Class, Spec: c.Spec, Ilvl: c.Ilvl,
+			RaiderIOURL: raiderio.ProfileURL(c.Region, c.Realm, c.Name),
+			Class:       c.Class, Spec: c.Spec, Ilvl: c.Ilvl,
 			Roles: roleChoicesToResponse(roles[c.ID]), IsMain: c.IsMain,
 		}
 	}

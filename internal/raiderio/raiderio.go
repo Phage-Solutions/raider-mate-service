@@ -25,6 +25,11 @@ var (
 	ErrInvalidRequest = errors.New("invalid request")
 	// ErrRateLimited means Raider.IO returned 429. The caller's tick should back off.
 	ErrRateLimited = errors.New("rate limited")
+	// ErrInvalidAPIKey means Raider.IO rejected the configured access key. Retrying
+	// cannot fix it, so it is worth telling apart from a transient failure: every
+	// request the worker makes from here on will fail the same way until the key is
+	// corrected.
+	ErrInvalidAPIKey = errors.New("invalid api key")
 )
 
 // Profile is our shape for a character, independent of Raider.IO's response format.
@@ -49,13 +54,18 @@ type GearItem struct {
 // between requests so a sync batch cannot exceed Raider.IO's rate limit.
 type Client struct {
 	baseURL    string
+	accessKey  string
 	httpClient *http.Client
 	gate       <-chan time.Time
 }
 
 // NewClient builds a Client. minInterval is the minimum gap enforced between
 // outgoing requests; pass 0 to disable gating (tests only).
-func NewClient(baseURL string, minInterval time.Duration) *Client {
+//
+// accessKey is the Raider.IO application key, empty for anonymous access. Raider.IO
+// takes it as a query parameter rather than a header, which is why it never appears in
+// an error here: the request URL carries the secret, and errors get logged.
+func NewClient(baseURL, accessKey string, minInterval time.Duration) *Client {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
@@ -67,6 +77,7 @@ func NewClient(baseURL string, minInterval time.Duration) *Client {
 
 	return &Client{
 		baseURL:    baseURL,
+		accessKey:  accessKey,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 		gate:       gate,
 	}
@@ -82,12 +93,16 @@ func (c *Client) CharacterProfile(ctx context.Context, region, realm, name strin
 		}
 	}
 
-	u := c.baseURL + "/api/v1/characters/profile?" + url.Values{
+	query := url.Values{
 		"region": {region},
 		"realm":  {realm},
 		"name":   {name},
 		"fields": {"gear,mythic_plus_scores_by_season:current"},
-	}.Encode()
+	}
+	if c.accessKey != "" {
+		query.Set("access_key", c.accessKey)
+	}
+	u := c.baseURL + "/api/v1/characters/profile?" + query.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -96,6 +111,12 @@ func (c *Client) CharacterProfile(ctx context.Context, region, realm, name strin
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		// *url.Error prints the URL it failed on, and that URL carries the access key.
+		// Unwrapping to the cause keeps the key out of the worker's logs.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
 		return Profile{}, fmt.Errorf("calling raider.io: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
@@ -111,6 +132,8 @@ func (c *Client) CharacterProfile(ctx context.Context, region, realm, name strin
 		return Profile{}, ErrCharacterNotFound
 	case http.StatusBadRequest:
 		return Profile{}, ErrInvalidRequest
+	case http.StatusForbidden:
+		return Profile{}, ErrInvalidAPIKey
 	case http.StatusTooManyRequests:
 		return Profile{}, ErrRateLimited
 	default:
@@ -123,6 +146,18 @@ func (c *Client) CharacterProfile(ctx context.Context, region, realm, name strin
 	}
 
 	return raw.toProfile(), nil
+}
+
+// ProfileURL is the human-facing Raider.IO page for a character, for clients that
+// want to link a raider's name somewhere a person will click it. Unlike the API
+// endpoint above it never goes through Client.baseURL: that field exists so a test
+// can point the API call at an httptest server, and a link handed to a raider has to
+// resolve on the real site regardless.
+func ProfileURL(region, realm, name string) string {
+	return defaultBaseURL + "/characters/" +
+		url.PathEscape(region) + "/" +
+		url.PathEscape(realm) + "/" +
+		url.PathEscape(name)
 }
 
 // rawProfile mirrors the fields we request from the Raider.IO profile endpoint.

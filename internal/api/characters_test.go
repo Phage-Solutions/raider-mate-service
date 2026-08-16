@@ -307,6 +307,22 @@ func TestCharacterSummaryWithNoRoleMenuSerialisesAsAnEmptyArray(t *testing.T) {
 	}
 }
 
+// Both shapes carry the link, and the summary carries it without carrying region.
+func TestCharacterResponsesCarryTheRaiderIOProfileURL(t *testing.T) {
+	id := uuid.New()
+	character := roster.Character{ID: id, Name: "Thrall", Realm: "Draenor", Region: "eu"}
+	want := "https://raider.io/characters/eu/Draenor/Thrall"
+
+	if got := characterToResponse(character, true, false).RaiderIOURL; got != want {
+		t.Errorf("characterResponse.RaiderIOURL = %q, want %q", got, want)
+	}
+
+	byID := characterSummaries([]roster.Character{character}, nil)
+	if got := byID[id].RaiderIOURL; got != want {
+		t.Errorf("characterSummary.RaiderIOURL = %q, want %q", got, want)
+	}
+}
+
 func TestLookupCharacterOmitsAnUnknownID(t *testing.T) {
 	byID := characterSummaries([]roster.Character{{ID: uuid.New(), Name: "Thrall"}}, nil)
 
