@@ -76,4 +76,8 @@ make lint
 make test
 ```
 
+If the change is visible to someone running the service or calling the API, add a line
+under `## [Unreleased]` in `CHANGELOG.md`. That section becomes the release notes when
+the next tag is cut.
+
 Small commits, one concern each.

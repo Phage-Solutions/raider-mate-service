@@ -16,6 +16,10 @@ import (
 	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
 )
 
+// Set at build time with -X main.version. Unlike a JVM manifest, a Go binary carries
+// no version unless the linker is told one.
+var version = "dev"
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -48,6 +52,7 @@ func run() error {
 	runner := signup.NewRunner(reminderStore, logger)
 
 	logger.Info("starting worker",
+		"version", version,
 		"sync_interval", cfg.SyncInterval,
 		"sync_stale_after", cfg.SyncStaleAfter,
 		"sync_batch", cfg.SyncBatch,

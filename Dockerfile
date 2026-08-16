@@ -16,13 +16,17 @@ COPY . .
 
 ARG CMD=api
 
+# The release workflow passes the git tag. Left at dev for a local or CI build, which
+# is exactly what an unversioned binary should call itself.
+ARG VERSION=dev
+
 # CGO off makes the binary static, which is what lets the runtime stage be a base with
 # no libc at all. trimpath keeps build paths out of panics; -s -w drops the symbol and
 # DWARF tables, which the service has no use for in production.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags='-s -w' -o /out/service ./cmd/${CMD}
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/service ./cmd/${CMD}
 
 # distroless static carries ca-certificates, which the worker needs to reach Raider.IO
 # over TLS, and nothing else: no shell, no package manager, no busybox. The :nonroot

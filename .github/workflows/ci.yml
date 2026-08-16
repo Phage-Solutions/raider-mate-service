@@ -10,7 +10,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -28,9 +28,9 @@ jobs:
   build-test-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -46,3 +46,41 @@ jobs:
 
       - name: lint
         run: go tool golangci-lint run
+
+  sqlc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # A hand-edited query file and a stale internal/db compile fine and pass tests,
+      # then diverge from the schema at runtime. Regenerating and diffing is the only
+      # thing that catches it.
+      - name: check generated queries are current
+        run: |
+          go tool sqlc generate
+          git diff --exit-code -- internal/db
+
+  docker:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cmd: [api, worker]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Build only. A Dockerfile regression should fail on the PR, not on tag day when
+      # the release workflow is the first thing to touch it.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          build-args: CMD=${{ matrix.cmd }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.cmd }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cmd }}

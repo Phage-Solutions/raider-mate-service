@@ -2,9 +2,12 @@ package api
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
 )
@@ -128,4 +131,84 @@ func markNotificationDeliveredHandler(outbox *signup.Outbox, logger *slog.Logger
 			w.WriteHeader(http.StatusNoContent)
 		}
 	}
+}
+
+// queueWatcher is the wake-up signal the stream serves. Declared here, by the consumer,
+// so the handler needs nothing from the database and its test needs no container.
+type queueWatcher interface {
+	Subscribe() (<-chan struct{}, func())
+}
+
+// streamHeartbeat is how often an idle stream writes a comment line. A bot whose
+// connection died silently, behind a proxy or a laptop lid, finds out on the next one
+// instead of waiting for a notification that may be hours away.
+const streamHeartbeat = 30 * time.Second
+
+// streamNotificationsHandler holds a Server-Sent Events stream open and writes one
+// event whenever something lands in the outbox. The event carries no data: the bot
+// answers it by calling the claim route, which is what makes this a signal rather than
+// a second delivery path with its own ack semantics to get wrong.
+//
+// It sits behind requireServiceKey with the other two outbox routes. Losing the stream
+// costs latency and nothing else, since the bot still polls on a slow timer.
+func streamNotificationsHandler(watcher queueWatcher, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// The server sets a 30s write deadline for ordinary handlers, which would cut
+		// this one mid-stream. Clearing it is per-response, so the timeout still covers
+		// every other route. A ResponseWriter that cannot do this is not fatal: the
+		// stream is cut every 30s and the bot reconnects, which is worse than it needs
+		// to be but still correct.
+		rc := http.NewResponseController(w)
+		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+			logger.WarnContext(r.Context(), "stream write deadline not clearable", "error", err)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+
+		queued, unsubscribe := watcher.Subscribe()
+		defer unsubscribe()
+
+		heartbeat := time.NewTicker(streamHeartbeat)
+		defer heartbeat.Stop()
+
+		// One event before anything happens, so rows queued while the bot was away are
+		// claimed on connect rather than sitting until the next insert.
+		if !writeStreamEvent(w, rc, "notification") {
+			return
+		}
+
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-queued:
+				if !writeStreamEvent(w, rc, "notification") {
+					return
+				}
+			case <-heartbeat.C:
+				if !writeStreamComment(w, rc) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// writeStreamEvent writes one SSE event and flushes it. It reports whether the stream
+// is still usable: a failed write means the bot is gone, which is ordinary and not
+// worth logging on every disconnect.
+func writeStreamEvent(w http.ResponseWriter, rc *http.ResponseController, name string) bool {
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: {}\n\n", name); err != nil {
+		return false
+	}
+	return rc.Flush() == nil
+}
+
+func writeStreamComment(w http.ResponseWriter, rc *http.ResponseController) bool {
+	if _, err := io.WriteString(w, ":\n\n"); err != nil {
+		return false
+	}
+	return rc.Flush() == nil
 }

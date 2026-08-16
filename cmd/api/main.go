@@ -11,11 +11,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phage-Solutions/raider-mate-service/internal/api"
+	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
 	"github.com/Phage-Solutions/raider-mate-service/migrations"
 )
+
+// Set at build time with -X main.version. Unlike a JVM manifest, a Go binary carries
+// no version unless the linker is told one.
+var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -31,6 +37,8 @@ func run() error {
 	}
 
 	logger := newLogger(cfg.LogLevel)
+	// Before migrations, so a failed migration still says which build attempted it.
+	logger.Info("starting api", "version", version)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -48,11 +56,22 @@ func run() error {
 	}
 	defer pool.Close()
 
+	// The listener holds a connection inside LISTEN, where it is useless for queries
+	// and must never go back to the pool, so it takes one out of the pool for good.
+	hub := signup.NewHub()
+	go signup.NewListener(func(ctx context.Context) (*pgx.Conn, error) {
+		acquired, err := pool.Acquire(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return acquired.Hijack(), nil
+	}, hub, logger).Run(ctx)
+
 	// net/http has no default timeouts, unlike a servlet container. Without these a
 	// client that dribbles headers holds a connection open forever.
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           api.NewRouter(pool, cfg.ServiceAPIKey, logger),
+		Handler:           api.NewRouter(pool, cfg.ServiceAPIKey, hub, logger),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

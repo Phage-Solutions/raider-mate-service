@@ -14,7 +14,7 @@ import (
 // NewRouter builds the HTTP handler tree for the service. Wiring is by hand: each
 // domain package's Store is constructed once and handed to the use cases that need
 // it, the same shape cmd/worker uses for roster.Syncer and signup.Runner.
-func NewRouter(pool *pgxpool.Pool, apiKey string, logger *slog.Logger) http.Handler {
+func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthzHandler(pool, logger))
 
@@ -79,6 +79,8 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, logger *slog.Logger) http.Hand
 		requireServiceKey(listNotificationsHandler(outbox, logger), apiKey, logger))
 	mux.Handle("POST /api/notifications/{id}/delivered",
 		requireServiceKey(markNotificationDeliveredHandler(outbox, logger), apiKey, logger))
+	mux.Handle("GET /api/notifications/stream",
+		requireServiceKey(streamNotificationsHandler(queued, logger), apiKey, logger))
 
 	return recoverPanic(logRequests(mux, logger), logger)
 }
