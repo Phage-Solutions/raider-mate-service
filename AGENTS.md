@@ -83,6 +83,18 @@ Violating these produces broken behaviour, not just untidy code.
     edited. If a change lands mid-task from another source, verification restarts:
     what passed before those edits says nothing about what is on disk now.
 
+    Run the whole suite, never a `-run` subset. A filtered run is for iterating on one
+    failure; it is not evidence, because the edit that fixed it is exactly the kind
+    that breaks a test elsewhere. Pass `-count=1` when re-running a target after an
+    edit outside Go source, so a cached result cannot stand in for a run.
+
+    A green suite proves the tree on the machine that ran it. Anything a test reads
+    from its environment (clock granularity, timezone, locale, Docker image tag) is a
+    way for it to pass here and fail on your machine, so pin it in the test rather
+    than trusting the local value. `time.Now()` on darwin/arm64 is microsecond
+    granular, which is precisely the resolution `timestamptz` stores, so a nanosecond
+    truncation bug is invisible on a Mac.
+
     Report the actual output. "Tests pass" without having run them since the last
     edit is a false statement about the state of the repo, not an optimistic one.
 

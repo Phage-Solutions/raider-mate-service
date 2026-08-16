@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func seedUserAndCharacter(ctx context.Context, t *testing.T, q *Queries, discordID int64, name string) (User, Character) {
@@ -54,7 +53,10 @@ func TestUpdateEventPartiallyUpdatesLeavingOtherFieldsAlone(t *testing.T) {
 		t.Errorf("title = %q, want it unchanged at %q", updated.Title, event.Title)
 	}
 
-	newStart := pgtype.Timestamptz{Time: time.Now().Add(3 * time.Hour), Valid: true}
+	// The stray nanoseconds are deliberate: darwin/arm64 hands out microsecond-granular
+	// times, so without them this assertion never meets the truncation that timestamptz
+	// applies, and the test passes here while failing on any finer clock.
+	newStart := dbTimestamptz(time.Now().Add(3*time.Hour + 195*time.Nanosecond))
 	rescheduled, err := q.UpdateEvent(ctx, UpdateEventParams{ID: event.ID, StartsAt: newStart})
 	if err != nil {
 		t.Fatalf("updating starts_at: %v", err)
@@ -132,7 +134,7 @@ func TestUpsertSignupLateUntilRoundTripsAndClearsOnStatusChange(t *testing.T) {
 	event := seedEventForJobs(ctx, t, q, 56)
 	_, character := seedUserAndCharacter(ctx, t, q, 57, "Latecomer")
 
-	lateUntil := pgtype.Timestamptz{Time: time.Now().Add(20 * time.Minute), Valid: true}
+	lateUntil := dbTimestamptz(time.Now().Add(20*time.Minute + 195*time.Nanosecond))
 	signup, err := q.UpsertSignup(ctx, UpsertSignupParams{
 		EventID: event.ID, CharacterID: character.ID, Status: SignupStatusLATE, LateUntil: lateUntil,
 	})

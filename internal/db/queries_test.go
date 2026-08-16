@@ -30,6 +30,16 @@ func newTxQueries(ctx context.Context, t *testing.T) (*Queries, pgx.Tx) {
 	return New(tx), tx
 }
 
+// dbTimestamptz rounds a Go time down to what timestamptz can hold. Postgres stores
+// microseconds and time.Now() offers nanoseconds, so a raw time.Now() comes back from
+// a round trip a few hundred nanoseconds earlier than it went in, and an equality
+// assertion against it fails. Only on a machine whose clock is that fine: darwin/arm64
+// hands out microsecond-granular values, which is why this passed locally and failed
+// everywhere else. Truncating at the seed keeps the assertions exact.
+func dbTimestamptz(at time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: at.Truncate(time.Microsecond), Valid: true}
+}
+
 func TestUpsertUserIsIdempotentPerGuild(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
