@@ -5,9 +5,11 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -230,38 +232,100 @@ func TestListUndecidedForEventSkipsAUserWhoAnsweredOnOneCharacter(t *testing.T) 
 	}
 }
 
-func TestListConfirmedWithRoleOnlyReturnsAssignedSignups(t *testing.T) {
+// The pre-event reminder goes to everyone who said they are coming, whether or not the
+// comp is locked and whether or not they hold a seat in it. Someone who declined is not
+// coming, and pinging them is noise about a raid they already answered.
+func TestListAttendingForEventCoversEveryStatusThatMeansComing(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
 	event := seedEventForJobs(ctx, t, q, 61)
-	user, assigned := seedUserAndCharacter(ctx, t, q, 62, "Assigned")
-	_, unassigned := seedUserAndCharacter(ctx, t, q, 63, "Unassigned")
 
-	for _, c := range []Character{assigned, unassigned} {
-		if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
-			ID:      NewID(),
-			EventID: event.ID, CharacterID: c.ID, Status: SignupStatusCONFIRMED,
-		}); err != nil {
-			t.Fatalf("signing up %s: %v", c.Name, err)
+	coming := map[int64]SignupStatus{
+		62: SignupStatusCONFIRMED,
+		63: SignupStatusLATE,
+		64: SignupStatusTENTATIVE,
+	}
+	staying := map[int64]SignupStatus{
+		65: SignupStatusDECLINED,
+		66: SignupStatusABSENT,
+	}
+	for discordID, status := range coming {
+		_, character := seedUserAndCharacter(ctx, t, q, discordID, fmt.Sprintf("Coming%d", discordID))
+		signUpAs(ctx, t, q, event.ID, character.ID, status)
+	}
+	for discordID, status := range staying {
+		_, character := seedUserAndCharacter(ctx, t, q, discordID, fmt.Sprintf("Staying%d", discordID))
+		signUpAs(ctx, t, q, event.ID, character.ID, status)
+	}
+
+	rows, err := q.ListAttendingForEvent(ctx, event.ID)
+	if err != nil {
+		t.Fatalf("listing attending: %v", err)
+	}
+
+	got := make(map[int64]bool, len(rows))
+	for _, row := range rows {
+		got[row.DiscordID] = true
+	}
+	for discordID, status := range coming {
+		if !got[discordID] {
+			t.Errorf("%s signup missing from %v", status, got)
 		}
 	}
+	for discordID, status := range staying {
+		if got[discordID] {
+			t.Errorf("%s signup present in %v, want it left out", status, got)
+		}
+	}
+}
+
+// One person is one ping however many alts they signed up on, and the row that survives
+// is the one holding a seat, so a DM can still name the role they are playing.
+func TestListAttendingForEventCollapsesAltsAndPrefersTheSeatedOne(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	event := seedEventForJobs(ctx, t, q, 67)
+	user, main := seedUserAndCharacter(ctx, t, q, 68, "Main")
+	alt, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
+		UserID: user.ID, Name: "Alt", Realm: "Area-52", Region: "us", IsMain: false,
+	})
+	if err != nil {
+		t.Fatalf("creating alt: %v", err)
+	}
+
+	signUpAs(ctx, t, q, event.ID, main.ID, SignupStatusCONFIRMED)
+	signUpAs(ctx, t, q, event.ID, alt.ID, SignupStatusCONFIRMED)
+
 	tank := RoleEnumTANK
 	if err := q.SetSignupAssignedRole(ctx, SetSignupAssignedRoleParams{
-		EventID: event.ID, CharacterID: assigned.ID, AssignedRole: &tank,
+		EventID: event.ID, CharacterID: alt.ID, AssignedRole: &tank,
 	}); err != nil {
 		t.Fatalf("assigning role: %v", err)
 	}
 
-	rows, err := q.ListConfirmedWithRole(ctx, event.ID)
+	rows, err := q.ListAttendingForEvent(ctx, event.ID)
 	if err != nil {
-		t.Fatalf("listing confirmed with role: %v", err)
+		t.Fatalf("listing attending: %v", err)
 	}
 	if len(rows) != 1 || rows[0].DiscordID != user.DiscordID {
-		t.Fatalf("rows = %+v, want exactly the assigned character's user", rows)
+		t.Fatalf("rows = %+v, want one row for the one person behind both characters", rows)
 	}
 	if rows[0].AssignedRole == nil || *rows[0].AssignedRole != RoleEnumTANK {
-		t.Errorf("assigned_role = %v, want TANK", rows[0].AssignedRole)
+		t.Errorf("assigned_role = %v, want TANK, the alt that holds the seat", rows[0].AssignedRole)
+	}
+}
+
+func signUpAs(ctx context.Context, t *testing.T, q *Queries, eventID, characterID uuid.UUID, status SignupStatus) {
+	t.Helper()
+
+	if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
+		ID:      NewID(),
+		EventID: eventID, CharacterID: characterID, Status: status,
+	}); err != nil {
+		t.Fatalf("signing up as %s: %v", status, err)
 	}
 }
 

@@ -23,7 +23,7 @@ WHERE id IN (
     LIMIT $3
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, channel_id, payload, created_at, delivered_at, claimed_at
+RETURNING id, discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, channel_id, payload, created_at, delivered_at, claimed_at, discord_ids
 `
 
 type ClaimNotificationsParams struct {
@@ -62,6 +62,7 @@ func (q *Queries) ClaimNotifications(ctx context.Context, arg ClaimNotifications
 			&i.CreatedAt,
 			&i.DeliveredAt,
 			&i.ClaimedAt,
+			&i.DiscordIds,
 		); err != nil {
 			return nil, err
 		}
@@ -74,8 +75,8 @@ func (q *Queries) ClaimNotifications(ctx context.Context, arg ClaimNotifications
 }
 
 const insertNotification = `-- name: InsertNotification :execrows
-INSERT INTO notifications (id, discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, channel_id, payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO notifications (id, discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, discord_ids, channel_id, payload)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT DO NOTHING
 `
 
@@ -87,6 +88,7 @@ type InsertNotificationParams struct {
 	TargetKind     NotificationTarget
 	DiscordID      *int64
 	RoleIds        []int64
+	DiscordIds     []int64
 	ChannelID      *int64
 	Payload        []byte
 }
@@ -107,6 +109,7 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 		arg.TargetKind,
 		arg.DiscordID,
 		arg.RoleIds,
+		arg.DiscordIds,
 		arg.ChannelID,
 		arg.Payload,
 	)

@@ -16,10 +16,10 @@ import (
 // retrying and flips to FAILED. Without this, attempts is a column nothing ever reads.
 const maxJobAttempts = 3
 
-// ConfirmedSignup is one row from ListConfirmedWithRole: a person who holds an
-// assigned seat, whether or not their signup status literally reads CONFIRMED (a
-// LATE raider with a seat still needs the hour-out reminder).
-type ConfirmedSignup struct {
+// AttendingSignup is one row from ListAttendingForEvent: a person who said they are
+// turning up, with the role they were assigned if the comp has been locked and they
+// hold a seat in it.
+type AttendingSignup struct {
 	DiscordID    int64
 	AssignedRole *db.RoleEnum
 }
@@ -40,9 +40,10 @@ type reminderStore interface {
 	GetEvent(ctx context.Context, id uuid.UUID) (Event, error)
 	ListSignupsForEvent(ctx context.Context, eventID uuid.UUID) ([]Signup, error)
 	ListUndecidedForEvent(ctx context.Context, eventID uuid.UUID) ([]int64, error)
-	ListConfirmedWithRole(ctx context.Context, eventID uuid.UUID) ([]ConfirmedSignup, error)
+	ListAttendingForEvent(ctx context.Context, eventID uuid.UUID) ([]AttendingSignup, error)
 	CountCompSlotsForEvent(ctx context.Context, eventID uuid.UUID) (int64, error)
 	RaidLeadRoleIDs(ctx context.Context, discordGuildID int64) ([]int64, error)
+	GuildSettings(ctx context.Context, discordGuildID int64) (GuildSettings, error)
 	InsertNotification(ctx context.Context, n Notification) error
 }
 
@@ -124,8 +125,8 @@ func (r *Runner) buildNotifications(ctx context.Context, tx reminderStore, job d
 	switch job.JobType {
 	case db.JobEnumREMINDER24H:
 		return r.buildReminder24h(ctx, tx, event)
-	case db.JobEnumREMINDER1H:
-		return r.buildReminder1h(ctx, tx, event)
+	case db.JobEnumREMINDERPREEVENT:
+		return r.buildReminderPreEvent(ctx, tx, event)
 	case db.JobEnumSIGNUPDEADLINE:
 		return r.buildSignupDeadline(ctx, tx, event)
 	case db.JobEnumCOMPNAG:
@@ -171,39 +172,96 @@ func (r *Runner) buildReminder24h(ctx context.Context, tx reminderStore, event E
 	return notifications, false, nil
 }
 
-type reminder1hPayload struct {
+// reminderPreEventPingPayload is the body of the channel ping. The mentions themselves
+// ride on the notification row's discord_ids, the same way a ROLE notification carries
+// its role ids there; only what the message says belongs in here.
+type reminderPreEventPingPayload struct {
+	Title    string    `json:"title"`
+	StartsAt time.Time `json:"starts_at"`
+	// MessageID lets the bot link back to the signup sheet, which already shows the
+	// comp the ping deliberately does not repeat. Nil before the bot has posted.
+	MessageID *int64 `json:"message_id"`
+}
+
+type reminderPreEventDMPayload struct {
 	Title        string       `json:"title"`
 	StartsAt     time.Time    `json:"starts_at"`
 	AssignedRole *db.RoleEnum `json:"assigned_role"`
 }
 
-// buildReminder1h DMs whoever holds an assigned seat, each with their own role.
-func (r *Runner) buildReminder1h(ctx context.Context, tx reminderStore, event Event) ([]Notification, bool, error) {
-	rows, err := tx.ListConfirmedWithRole(ctx, event.ID)
+// buildReminderPreEvent tells everyone who said they are coming that the event is about
+// to start. It does not read the comp: a raider left out of a locked twenty still wants
+// to know, and an unlocked event has assigned nobody.
+//
+// The guild chooses how it arrives. A PING is one message in the events channel that
+// mentions them all, which is what a raider actually sees ten minutes before an invite;
+// DM is one message each, and carries the assigned role when there is one.
+func (r *Runner) buildReminderPreEvent(ctx context.Context, tx reminderStore, event Event) ([]Notification, bool, error) {
+	rows, err := tx.ListAttendingForEvent(ctx, event.ID)
 	if err != nil {
-		return nil, false, fmt.Errorf("listing confirmed: %w", err)
+		return nil, false, fmt.Errorf("listing attending: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, true, nil
 	}
 
-	notifications := make([]Notification, len(rows))
-	for i, row := range rows {
-		payload, err := json.Marshal(reminder1hPayload{
-			Title: event.Title, StartsAt: event.StartsAt, AssignedRole: row.AssignedRole,
-		})
-		if err != nil {
-			return nil, false, fmt.Errorf("encoding payload: %w", err)
-		}
+	settings, err := tx.GuildSettings(ctx, event.DiscordGuildID)
+	if err != nil {
+		return nil, false, fmt.Errorf("reading guild settings: %w", err)
+	}
+	delivery := settings.Delivery()
 
-		discordID := row.DiscordID
-		notifications[i] = Notification{
-			DiscordGuildID: event.DiscordGuildID,
-			EventID:        event.ID,
-			Kind:           db.NotificationKindREMINDER1H,
-			TargetKind:     db.NotificationTargetUSER,
-			DiscordID:      &discordID,
-			Payload:        payload,
+	var notifications []Notification
+
+	if delivery == db.ReminderDeliveryPING || delivery == db.ReminderDeliveryBOTH {
+		if event.ChannelID == nil {
+			r.logger.WarnContext(ctx, "pre-event reminder has no channel to ping in", "event_id", event.ID)
+		} else {
+			payload, err := json.Marshal(reminderPreEventPingPayload{
+				Title: event.Title, StartsAt: event.StartsAt, MessageID: event.MessageID,
+			})
+			if err != nil {
+				return nil, false, fmt.Errorf("encoding payload: %w", err)
+			}
+
+			mentions := make([]int64, len(rows))
+			for i, row := range rows {
+				mentions[i] = row.DiscordID
+			}
+			notifications = append(notifications, Notification{
+				DiscordGuildID: event.DiscordGuildID,
+				EventID:        event.ID,
+				Kind:           db.NotificationKindREMINDERPREEVENT,
+				TargetKind:     db.NotificationTargetCHANNEL,
+				DiscordIDs:     mentions,
+				ChannelID:      event.ChannelID,
+				Payload:        payload,
+			})
 		}
 	}
-	return notifications, false, nil
+
+	if delivery == db.ReminderDeliveryDM || delivery == db.ReminderDeliveryBOTH {
+		for _, row := range rows {
+			payload, err := json.Marshal(reminderPreEventDMPayload{
+				Title: event.Title, StartsAt: event.StartsAt, AssignedRole: row.AssignedRole,
+			})
+			if err != nil {
+				return nil, false, fmt.Errorf("encoding payload: %w", err)
+			}
+
+			discordID := row.DiscordID
+			notifications = append(notifications, Notification{
+				DiscordGuildID: event.DiscordGuildID,
+				EventID:        event.ID,
+				Kind:           db.NotificationKindREMINDERPREEVENT,
+				TargetKind:     db.NotificationTargetUSER,
+				DiscordID:      &discordID,
+				Payload:        payload,
+			})
+		}
+	}
+
+	return notifications, len(notifications) == 0, nil
 }
 
 type signupDeadlinePayload struct {

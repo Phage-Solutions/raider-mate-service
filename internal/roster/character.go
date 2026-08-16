@@ -78,7 +78,14 @@ func NewCharacters(store characterStore) *Characters {
 // raider has no main yet, so registering an alt never takes the flag off the character
 // that holds it. Moving it is SetMain. Registering the same name, realm and region
 // twice returns ErrCharacterExists rather than a constraint error.
+//
+// Realm and region are canonicalised to the form Raider.IO's API takes before they are
+// stored. A realm typed as a raider sees it in game ("Twisting Nether") is not a slug,
+// and the syncer's fetch would fail on it forever without ever clearing last_synced.
 func (c *Characters) Register(ctx context.Context, in RegisterInput) (Character, error) {
+	in.Realm = slugifyRealm(in.Realm)
+	in.Region = normalizeRegion(in.Region)
+
 	character, err := c.store.RegisterCharacter(ctx, in)
 	if err != nil {
 		if errors.Is(err, ErrCharacterExists) {

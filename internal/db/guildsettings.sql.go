@@ -10,7 +10,7 @@ import (
 )
 
 const getGuildSettings = `-- name: GetGuildSettings :one
-SELECT discord_guild_id, events_channel_id, updated_at, timezone, event_mention_role_ids, event_banner_url FROM guild_settings
+SELECT discord_guild_id, events_channel_id, updated_at, timezone, event_mention_role_ids, event_banner_url, reminder_lead_minutes, reminder_delivery FROM guild_settings
 WHERE discord_guild_id = $1
 `
 
@@ -24,20 +24,24 @@ func (q *Queries) GetGuildSettings(ctx context.Context, discordGuildID int64) (G
 		&i.Timezone,
 		&i.EventMentionRoleIds,
 		&i.EventBannerUrl,
+		&i.ReminderLeadMinutes,
+		&i.ReminderDelivery,
 	)
 	return i, err
 }
 
 const upsertGuildSettings = `-- name: UpsertGuildSettings :one
-INSERT INTO guild_settings (discord_guild_id, events_channel_id, timezone, event_mention_role_ids, event_banner_url)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO guild_settings (discord_guild_id, events_channel_id, timezone, event_mention_role_ids, event_banner_url, reminder_lead_minutes, reminder_delivery)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (discord_guild_id) DO UPDATE
 SET events_channel_id = excluded.events_channel_id,
     timezone = excluded.timezone,
     event_mention_role_ids = excluded.event_mention_role_ids,
     event_banner_url = excluded.event_banner_url,
+    reminder_lead_minutes = excluded.reminder_lead_minutes,
+    reminder_delivery = excluded.reminder_delivery,
     updated_at = now()
-RETURNING discord_guild_id, events_channel_id, updated_at, timezone, event_mention_role_ids, event_banner_url
+RETURNING discord_guild_id, events_channel_id, updated_at, timezone, event_mention_role_ids, event_banner_url, reminder_lead_minutes, reminder_delivery
 `
 
 type UpsertGuildSettingsParams struct {
@@ -46,6 +50,8 @@ type UpsertGuildSettingsParams struct {
 	Timezone            *string
 	EventMentionRoleIds []int64
 	EventBannerUrl      *string
+	ReminderLeadMinutes *int32
+	ReminderDelivery    *ReminderDelivery
 }
 
 // Whole-row write. There is one settable field today and a guild that has never been
@@ -57,6 +63,8 @@ func (q *Queries) UpsertGuildSettings(ctx context.Context, arg UpsertGuildSettin
 		arg.Timezone,
 		arg.EventMentionRoleIds,
 		arg.EventBannerUrl,
+		arg.ReminderLeadMinutes,
+		arg.ReminderDelivery,
 	)
 	var i GuildSetting
 	err := row.Scan(
@@ -66,6 +74,8 @@ func (q *Queries) UpsertGuildSettings(ctx context.Context, arg UpsertGuildSettin
 		&i.Timezone,
 		&i.EventMentionRoleIds,
 		&i.EventBannerUrl,
+		&i.ReminderLeadMinutes,
+		&i.ReminderDelivery,
 	)
 	return i, err
 }

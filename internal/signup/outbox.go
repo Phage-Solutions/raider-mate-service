@@ -20,6 +20,7 @@ type StoredNotification struct {
 	TargetKind     db.NotificationTarget
 	DiscordID      *int64
 	RoleIDs        []int64
+	DiscordIDs     []int64
 	ChannelID      *int64
 	Payload        []byte
 	CreatedAt      time.Time

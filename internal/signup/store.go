@@ -104,21 +104,34 @@ func (s *Store) CreateEvent(ctx context.Context, in CreateEventInput) (Event, er
 
 	q := s.queries.WithTx(tx)
 
+	// Resolved here rather than at fire time: the effective lead is stored on the event,
+	// so changing the guild default later cannot re-time a raid that is already posted.
+	lead := in.ReminderLeadMinutes
+	if lead == nil {
+		settings, err := guildSettings(ctx, q, in.DiscordGuildID)
+		if err != nil {
+			return Event{}, fmt.Errorf("reading guild settings: %w", err)
+		}
+		resolved := settings.ReminderLead()
+		lead = &resolved
+	}
+
 	row, err := q.CreateEvent(ctx, db.CreateEventParams{
-		ID:             db.NewID(),
-		DiscordGuildID: in.DiscordGuildID,
-		Type:           in.Type,
-		Title:          in.Title,
-		StartsAt:       pgtype.Timestamptz{Time: in.StartsAt, Valid: true},
-		SignupDeadline: pgtype.Timestamptz{Time: in.SignupDeadline, Valid: true},
-		CompTemplate:   in.CompTemplate,
-		Difficulty:     in.Difficulty,
+		ID:                  db.NewID(),
+		DiscordGuildID:      in.DiscordGuildID,
+		Type:                in.Type,
+		Title:               in.Title,
+		StartsAt:            pgtype.Timestamptz{Time: in.StartsAt, Valid: true},
+		SignupDeadline:      pgtype.Timestamptz{Time: in.SignupDeadline, Valid: true},
+		CompTemplate:        in.CompTemplate,
+		Difficulty:          in.Difficulty,
+		ReminderLeadMinutes: lead,
 	})
 	if err != nil {
 		return Event{}, fmt.Errorf("inserting event: %w", err)
 	}
 
-	if err := scheduleJobs(ctx, q, row.ID, in.StartsAt, in.SignupDeadline); err != nil {
+	if err := scheduleJobs(ctx, q, row.ID, in.StartsAt, in.SignupDeadline, *lead); err != nil {
 		return Event{}, err
 	}
 
@@ -162,12 +175,13 @@ func (s *Store) UpdateEvent(ctx context.Context, in UpdateEventInput) (Event, er
 	q := s.queries.WithTx(tx)
 
 	params := db.UpdateEventParams{
-		ID:           in.ID,
-		Title:        in.Title,
-		CompTemplate: in.CompTemplate,
-		Difficulty:   in.Difficulty,
-		MessageID:    in.MessageID,
-		ChannelID:    in.ChannelID,
+		ID:                  in.ID,
+		Title:               in.Title,
+		CompTemplate:        in.CompTemplate,
+		Difficulty:          in.Difficulty,
+		MessageID:           in.MessageID,
+		ChannelID:           in.ChannelID,
+		ReminderLeadMinutes: in.ReminderLeadMinutes,
 	}
 	if in.StartsAt != nil {
 		params.StartsAt = pgtype.Timestamptz{Time: *in.StartsAt, Valid: true}
@@ -181,11 +195,17 @@ func (s *Store) UpdateEvent(ctx context.Context, in UpdateEventInput) (Event, er
 		return Event{}, fmt.Errorf("updating event: %w", err)
 	}
 
-	if in.StartsAt != nil || in.SignupDeadline != nil {
+	if in.StartsAt != nil || in.SignupDeadline != nil || in.ReminderLeadMinutes != nil {
 		if err := q.CancelJobsForEvent(ctx, row.ID); err != nil {
 			return Event{}, fmt.Errorf("cancelling old jobs: %w", err)
 		}
-		if err := scheduleJobs(ctx, q, row.ID, row.StartsAt.Time, row.SignupDeadline.Time); err != nil {
+		// An event created before the lead time existed has no stored value. It gets the
+		// default here rather than losing its pre-event reminder to a title edit.
+		lead := DefaultReminderLeadMinutes
+		if row.ReminderLeadMinutes != nil {
+			lead = *row.ReminderLeadMinutes
+		}
+		if err := scheduleJobs(ctx, q, row.ID, row.StartsAt.Time, row.SignupDeadline.Time, lead); err != nil {
 			return Event{}, err
 		}
 	}
@@ -201,8 +221,8 @@ func (s *Store) DeleteEvent(ctx context.Context, id uuid.UUID) error {
 }
 
 // scheduleJobs writes the reminder/deadline schedule jobsFor computes for an event.
-func scheduleJobs(ctx context.Context, q *db.Queries, eventID uuid.UUID, startsAt, deadline time.Time) error {
-	for _, job := range jobsFor(startsAt, deadline, time.Now()) {
+func scheduleJobs(ctx context.Context, q *db.Queries, eventID uuid.UUID, startsAt, deadline time.Time, leadMinutes int32) error {
+	for _, job := range jobsFor(startsAt, deadline, leadMinutes, time.Now()) {
 		if err := q.ScheduleJob(ctx, db.ScheduleJobParams{
 			ID:      db.NewID(),
 			EventID: eventID, JobType: job.Kind, RunAt: pgtype.Timestamptz{Time: job.RunAt, Valid: true},
@@ -225,6 +245,8 @@ func eventFromRow(row db.Event) Event {
 		MessageID:      row.MessageID,
 		ChannelID:      row.ChannelID,
 		Difficulty:     row.Difficulty,
+
+		ReminderLeadMinutes: row.ReminderLeadMinutes,
 	}
 }
 
@@ -411,20 +433,20 @@ func (s *Store) ReplaceRaidLeadRoleIDs(ctx context.Context, discordGuildID int64
 // no row, which is not an error: the zero value is the correct answer, and every guild
 // starts there.
 func (s *Store) GuildSettings(ctx context.Context, discordGuildID int64) (GuildSettings, error) {
-	row, err := s.queries.GetGuildSettings(ctx, discordGuildID)
+	return guildSettings(ctx, s.queries, discordGuildID)
+}
+
+// guildSettings takes the queries to read through, so a caller inside a transaction
+// reads on the same connection rather than opening a second one mid-write.
+func guildSettings(ctx context.Context, q *db.Queries, discordGuildID int64) (GuildSettings, error) {
+	row, err := q.GetGuildSettings(ctx, discordGuildID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return GuildSettings{DiscordGuildID: discordGuildID}, nil
 	}
 	if err != nil {
 		return GuildSettings{}, err
 	}
-	return GuildSettings{
-		DiscordGuildID:      row.DiscordGuildID,
-		EventsChannelID:     row.EventsChannelID,
-		Timezone:            row.Timezone,
-		EventMentionRoleIDs: row.EventMentionRoleIds,
-		EventBannerURL:      row.EventBannerUrl,
-	}, nil
+	return guildSettingsFromRow(row), nil
 }
 
 func (s *Store) UpsertGuildSettings(ctx context.Context, settings GuildSettings) (GuildSettings, error) {
@@ -434,17 +456,25 @@ func (s *Store) UpsertGuildSettings(ctx context.Context, settings GuildSettings)
 		Timezone:            settings.Timezone,
 		EventMentionRoleIds: settings.EventMentionRoleIDs,
 		EventBannerUrl:      settings.EventBannerURL,
+		ReminderLeadMinutes: settings.ReminderLeadMinutes,
+		ReminderDelivery:    settings.ReminderDelivery,
 	})
 	if err != nil {
 		return GuildSettings{}, err
 	}
+	return guildSettingsFromRow(row), nil
+}
+
+func guildSettingsFromRow(row db.GuildSetting) GuildSettings {
 	return GuildSettings{
 		DiscordGuildID:      row.DiscordGuildID,
 		EventsChannelID:     row.EventsChannelID,
 		Timezone:            row.Timezone,
 		EventMentionRoleIDs: row.EventMentionRoleIds,
 		EventBannerURL:      row.EventBannerUrl,
-	}, nil
+		ReminderLeadMinutes: row.ReminderLeadMinutes,
+		ReminderDelivery:    row.ReminderDelivery,
+	}
 }
 
 // GuildChannels reads a guild's channel catalog, as the bot last pushed it.
@@ -551,6 +581,7 @@ func (s *Store) ClaimNotifications(ctx context.Context, guildID *int64, claimedB
 			TargetKind:     row.TargetKind,
 			DiscordID:      row.DiscordID,
 			RoleIDs:        row.RoleIds,
+			DiscordIDs:     row.DiscordIds,
 			ChannelID:      row.ChannelID,
 			Payload:        row.Payload,
 			CreatedAt:      row.CreatedAt.Time,
@@ -581,6 +612,7 @@ func (s *Store) InsertNotification(ctx context.Context, n Notification) error {
 		TargetKind:     n.TargetKind,
 		DiscordID:      n.DiscordID,
 		RoleIds:        n.RoleIDs,
+		DiscordIds:     n.DiscordIDs,
 		ChannelID:      n.ChannelID,
 		Payload:        n.Payload,
 	})
@@ -603,14 +635,14 @@ func (s *Store) ListUndecidedForEvent(ctx context.Context, eventID uuid.UUID) ([
 	return s.queries.ListUndecidedForEvent(ctx, eventID)
 }
 
-func (s *Store) ListConfirmedWithRole(ctx context.Context, eventID uuid.UUID) ([]ConfirmedSignup, error) {
-	rows, err := s.queries.ListConfirmedWithRole(ctx, eventID)
+func (s *Store) ListAttendingForEvent(ctx context.Context, eventID uuid.UUID) ([]AttendingSignup, error) {
+	rows, err := s.queries.ListAttendingForEvent(ctx, eventID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]ConfirmedSignup, len(rows))
+	out := make([]AttendingSignup, len(rows))
 	for i, row := range rows {
-		out[i] = ConfirmedSignup{DiscordID: row.DiscordID, AssignedRole: row.AssignedRole}
+		out[i] = AttendingSignup{DiscordID: row.DiscordID, AssignedRole: row.AssignedRole}
 	}
 	return out, nil
 }

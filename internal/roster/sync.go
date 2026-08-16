@@ -55,8 +55,8 @@ func NewSyncer(fetcher profileFetcher, store syncStore, logger *slog.Logger) *Sy
 
 // SyncDue fetches and writes fresh data for up to limit characters whose
 // last_synced is older than staleAfter (or unset). One character's failure does
-// not stop the rest of the batch; being rate limited does, since every remaining
-// request would be rejected too.
+// not stop the rest of the batch; being rate limited or holding a rejected access
+// key does, since every remaining request would be rejected too.
 func (s *Syncer) SyncDue(ctx context.Context, staleAfter time.Duration, limit int32) error {
 	due, err := s.store.DueForSync(ctx, time.Now().Add(-staleAfter), limit)
 	if err != nil {
@@ -68,7 +68,11 @@ func (s *Syncer) SyncDue(ctx context.Context, staleAfter time.Duration, limit in
 		if err == nil {
 			continue
 		}
-		if errors.Is(err, raiderio.ErrRateLimited) {
+		// Both of these are facts about the worker's access to Raider.IO, not about
+		// this character, so every remaining request in the batch would fail the same
+		// way. Carrying on would burn the whole batch and push all of it a full
+		// staleAfter into the future for a reason that has nothing to do with them.
+		if errors.Is(err, raiderio.ErrRateLimited) || errors.Is(err, raiderio.ErrInvalidAPIKey) {
 			return fmt.Errorf("abandoning batch after %d of %d characters: %w", i, len(due), err)
 		}
 

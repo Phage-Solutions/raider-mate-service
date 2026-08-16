@@ -122,7 +122,7 @@ func TestClaimNotificationsRedeliversAfterTheLeaseExpires(t *testing.T) {
 	discordID := int64(9003)
 	if _, err := q.InsertNotification(ctx, InsertNotificationParams{
 		ID:             NewID(),
-		DiscordGuildID: 100, EventID: event.ID, Kind: NotificationKindREMINDER1H,
+		DiscordGuildID: 100, EventID: event.ID, Kind: NotificationKindREMINDERPREEVENT,
 		TargetKind: NotificationTargetUSER, DiscordID: &discordID, Payload: []byte(`{}`),
 	}); err != nil {
 		t.Fatalf("inserting notification: %v", err)
@@ -226,7 +226,7 @@ func TestNotificationCheckConstraintRejectsUserRowWithNoDiscordID(t *testing.T) 
 
 	_, err := q.InsertNotification(ctx, InsertNotificationParams{
 		ID:             NewID(),
-		DiscordGuildID: 100, EventID: event.ID, Kind: NotificationKindREMINDER1H,
+		DiscordGuildID: 100, EventID: event.ID, Kind: NotificationKindREMINDERPREEVENT,
 		TargetKind: NotificationTargetUSER, Payload: []byte(`{}`),
 	})
 	var pgErr *pgconn.PgError

@@ -12,6 +12,47 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+### Added
+
+- Events carry a `reminder_lead_minutes`: how long before the start the pre-event
+  reminder fires. `POST` and `PATCH /api/events/{id}` accept it (0 to 1440, where 0
+  means no reminder), and a create that omits it takes the guild's default, then 30
+  minutes. The value is resolved once and stored on the event, so changing the guild
+  default later does not re-time a raid that is already posted.
+- Guild settings carry `reminder_lead_minutes` and `reminder_delivery` (`PING`, `DM` or
+  `BOTH`, default `PING`), which decide the default lead time and whether the reminder
+  arrives as one channel post mentioning everyone or as a DM each.
+- `CHANNEL` notifications: a message posted in a channel that mentions the users in the
+  new `discord_ids` field. `role_ids` is unchanged and still means role mentions.
+
+### Changed
+
+- The pre-event reminder now goes to every distinct user with a `CONFIRMED`, `LATE` or
+  `TENTATIVE` signup, rather than only those holding an assigned comp slot. A raider
+  left out of a locked roster used to hear nothing. Alts still collapse to one recipient.
+- Migration `00005` renames `REMINDER_1H` to `REMINDER_PRE_EVENT` in `job_enum` and
+  `notification_kind`, since the hour is now a setting. Existing scheduled jobs and
+  notifications follow the rename with no backfill. Bots must understand the new kind
+  before this release goes out; the current bot release accepts both.
+- Migration `00006` adds the settings columns, `events.reminder_lead_minutes`,
+  `notifications.discord_ids`, and extends the notification target check for `CHANNEL`.
+
+### Fixed
+
+- Characters registered with a realm as it reads in game ("Twisting Nether") or a
+  region in capitals ("EU") never synced from Raider.IO: the fetch was rejected every
+  time, and a rejected fetch leaves `last_synced` NULL on purpose, so those characters
+  showed no ilvl or Mythic+ score indefinitely with nothing in the API to say why.
+  `POST /api/guilds/{gid}/characters` now stores the canonical slug form of `realm` and
+  a lowercase `region`, and migration `00004` rewrites the rows already on file. Clients
+  may keep sending a realm as the raider typed it; the `realm` in a character response
+  is now the slug, which is also what `raiderio_url` has always used. Duplicate
+  registrations that differ only in realm spelling now collide as they should.
+- A Raider.IO access key the API rejects no longer consumes an entire sync batch before
+  the worker gives up on the tick. It aborts on the first rejection, as it already did
+  for rate limiting, so the affected characters keep their queue position and sync on
+  the next tick once the key is corrected.
+
 ## [0.3.0] - 2026-08-16
 
 ### Added

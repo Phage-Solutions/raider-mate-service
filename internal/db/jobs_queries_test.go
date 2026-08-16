@@ -46,7 +46,7 @@ func TestClaimDueJobsOnlyClaimsPendingAndDue(t *testing.T) {
 	}
 	if err := q.ScheduleJob(ctx, ScheduleJobParams{
 		ID:      NewID(),
-		EventID: event.ID, JobType: JobEnumREMINDER1H, RunAt: pgtype.Timestamptz{Time: future, Valid: true},
+		EventID: event.ID, JobType: JobEnumREMINDERPREEVENT, RunAt: pgtype.Timestamptz{Time: future, Valid: true},
 	}); err != nil {
 		t.Fatalf("scheduling future job: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestMarkJobSentTransitionsOutOfPending(t *testing.T) {
 	event := seedEventForJobs(ctx, t, q, 33)
 	if err := q.ScheduleJob(ctx, ScheduleJobParams{
 		ID:      NewID(),
-		EventID: event.ID, JobType: JobEnumREMINDER1H,
+		EventID: event.ID, JobType: JobEnumREMINDERPREEVENT,
 		RunAt: pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true},
 	}); err != nil {
 		t.Fatalf("scheduling job: %v", err)
@@ -213,7 +213,7 @@ func TestCancelJobsForEventTouchesOnlyPending(t *testing.T) {
 	if err := q.ScheduleJob(ctx, ScheduleJobParams{ID: NewID(), EventID: event.ID, JobType: JobEnumREMINDER24H, RunAt: future}); err != nil {
 		t.Fatalf("scheduling pending job: %v", err)
 	}
-	if err := q.ScheduleJob(ctx, ScheduleJobParams{ID: NewID(), EventID: event.ID, JobType: JobEnumREMINDER1H, RunAt: future}); err != nil {
+	if err := q.ScheduleJob(ctx, ScheduleJobParams{ID: NewID(), EventID: event.ID, JobType: JobEnumREMINDERPREEVENT, RunAt: future}); err != nil {
 		t.Fatalf("scheduling second job: %v", err)
 	}
 

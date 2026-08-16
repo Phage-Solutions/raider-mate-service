@@ -23,8 +23,11 @@ type Notification struct {
 	TargetKind     db.NotificationTarget
 	DiscordID      *int64
 	RoleIDs        []int64
-	ChannelID      *int64
-	Payload        []byte
+	// DiscordIDs are the users a CHANNEL notification mentions. Roles and users render
+	// with different mention syntax, so they cannot share RoleIDs.
+	DiscordIDs []int64
+	ChannelID  *int64
+	Payload    []byte
 }
 
 // ErrRequestDecided means a late request has already been approved or rejected. The

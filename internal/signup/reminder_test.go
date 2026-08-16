@@ -24,10 +24,11 @@ type fakeReminderStore struct {
 	event       Event
 	jobs        []db.ScheduledJob
 	undecided   []int64
-	confirmed   []ConfirmedSignup
+	attending   []AttendingSignup
 	compSlots   int64
 	signups     []Signup
 	roleIDs     []int64
+	settings    GuildSettings
 	getEventErr error
 
 	notified []Notification
@@ -68,8 +69,12 @@ func (s *fakeReminderStore) ListUndecidedForEvent(context.Context, uuid.UUID) ([
 	return s.undecided, nil
 }
 
-func (s *fakeReminderStore) ListConfirmedWithRole(context.Context, uuid.UUID) ([]ConfirmedSignup, error) {
-	return s.confirmed, nil
+func (s *fakeReminderStore) ListAttendingForEvent(context.Context, uuid.UUID) ([]AttendingSignup, error) {
+	return s.attending, nil
+}
+
+func (s *fakeReminderStore) GuildSettings(context.Context, int64) (GuildSettings, error) {
+	return s.settings, nil
 }
 
 func (s *fakeReminderStore) CountCompSlotsForEvent(context.Context, uuid.UUID) (int64, error) {
@@ -114,13 +119,18 @@ func TestRunDueReminder24hEmitsOneRowPerUndecidedUser(t *testing.T) {
 	}
 }
 
-func TestRunDueReminder1hUsesTheAssignedRolePerSignup(t *testing.T) {
+// A guild that has configured nothing gets the ping, so the reminder lands where
+// raiders are already looking rather than in a DM nobody opens before a pull.
+func TestRunDuePreEventDefaultsToOnePingMentioningEveryoneAttending(t *testing.T) {
+	channelID := int64(42)
+	messageID := int64(7)
 	tank := db.RoleEnumTANK
 	store := &fakeReminderStore{
-		event: Event{Title: "Prog Night"},
-		jobs:  []db.ScheduledJob{{ID: uuid.New(), JobType: db.JobEnumREMINDER1H}},
-		confirmed: []ConfirmedSignup{
+		event: Event{Title: "Prog Night", ChannelID: &channelID, MessageID: &messageID},
+		jobs:  []db.ScheduledJob{{ID: uuid.New(), JobType: db.JobEnumREMINDERPREEVENT}},
+		attending: []AttendingSignup{
 			{DiscordID: 1, AssignedRole: &tank},
+			{DiscordID: 2},
 		},
 	}
 
@@ -129,13 +139,133 @@ func TestRunDueReminder1hUsesTheAssignedRolePerSignup(t *testing.T) {
 	}
 
 	if len(store.notified) != 1 {
-		t.Fatalf("notified = %d, want 1", len(store.notified))
+		t.Fatalf("notified = %d, want 1 ping", len(store.notified))
 	}
-	if store.notified[0].Kind != db.NotificationKindREMINDER1H {
-		t.Errorf("kind = %s, want REMINDER_1H", store.notified[0].Kind)
+	n := store.notified[0]
+	if n.Kind != db.NotificationKindREMINDERPREEVENT || n.TargetKind != db.NotificationTargetCHANNEL {
+		t.Errorf("notification = %+v, want a REMINDER_PRE_EVENT CHANNEL row", n)
 	}
-	if store.notified[0].DiscordID == nil || *store.notified[0].DiscordID != 1 {
-		t.Errorf("discord_id = %v, want 1", store.notified[0].DiscordID)
+	if len(n.DiscordIDs) != 2 || n.DiscordIDs[0] != 1 || n.DiscordIDs[1] != 2 {
+		t.Errorf("discord_ids = %v, want [1 2]", n.DiscordIDs)
+	}
+	if n.ChannelID == nil || *n.ChannelID != channelID {
+		t.Errorf("channel_id = %v, want %d", n.ChannelID, channelID)
+	}
+
+	var payload reminderPreEventPingPayload
+	if err := json.Unmarshal(n.Payload, &payload); err != nil {
+		t.Fatalf("decoding payload: %v", err)
+	}
+	if payload.MessageID == nil || *payload.MessageID != messageID {
+		t.Errorf("message_id = %v, want %d, the jump link back to the signup sheet", payload.MessageID, messageID)
+	}
+}
+
+func TestRunDuePreEventDMsEachAttendeeTheirAssignedRole(t *testing.T) {
+	dm := db.ReminderDeliveryDM
+	tank := db.RoleEnumTANK
+	store := &fakeReminderStore{
+		event:    Event{Title: "Prog Night"},
+		jobs:     []db.ScheduledJob{{ID: uuid.New(), JobType: db.JobEnumREMINDERPREEVENT}},
+		settings: GuildSettings{ReminderDelivery: &dm},
+		attending: []AttendingSignup{
+			{DiscordID: 1, AssignedRole: &tank},
+			{DiscordID: 2},
+		},
+	}
+
+	if err := NewRunner(store, newTestLogger()).RunDue(context.Background(), 10); err != nil {
+		t.Fatalf("RunDue: %v", err)
+	}
+
+	if len(store.notified) != 2 {
+		t.Fatalf("notified = %d, want 2 DMs", len(store.notified))
+	}
+	for _, n := range store.notified {
+		if n.TargetKind != db.NotificationTargetUSER {
+			t.Errorf("target = %s, want USER", n.TargetKind)
+		}
+	}
+
+	var seated reminderPreEventDMPayload
+	if err := json.Unmarshal(store.notified[0].Payload, &seated); err != nil {
+		t.Fatalf("decoding payload: %v", err)
+	}
+	if seated.AssignedRole == nil || *seated.AssignedRole != tank {
+		t.Errorf("assigned_role = %v, want TANK", seated.AssignedRole)
+	}
+
+	// A raider with no seat is still reminded. Their DM simply names no role, which is
+	// the case for every event whose comp was never locked.
+	var unseated reminderPreEventDMPayload
+	if err := json.Unmarshal(store.notified[1].Payload, &unseated); err != nil {
+		t.Fatalf("decoding payload: %v", err)
+	}
+	if unseated.AssignedRole != nil {
+		t.Errorf("assigned_role = %v, want nil", unseated.AssignedRole)
+	}
+}
+
+func TestRunDuePreEventBothSendsThePingAndTheDMs(t *testing.T) {
+	both := db.ReminderDeliveryBOTH
+	channelID := int64(42)
+	store := &fakeReminderStore{
+		event:     Event{Title: "Prog Night", ChannelID: &channelID},
+		jobs:      []db.ScheduledJob{{ID: uuid.New(), JobType: db.JobEnumREMINDERPREEVENT}},
+		settings:  GuildSettings{ReminderDelivery: &both},
+		attending: []AttendingSignup{{DiscordID: 1}, {DiscordID: 2}},
+	}
+
+	if err := NewRunner(store, newTestLogger()).RunDue(context.Background(), 10); err != nil {
+		t.Fatalf("RunDue: %v", err)
+	}
+
+	if len(store.notified) != 3 {
+		t.Fatalf("notified = %d, want 3 (one ping and two DMs)", len(store.notified))
+	}
+	if store.notified[0].TargetKind != db.NotificationTargetCHANNEL {
+		t.Errorf("first target = %s, want CHANNEL", store.notified[0].TargetKind)
+	}
+}
+
+// An event nobody has signed up to has nobody to remind. The job is done, not failed:
+// retrying it three times would not conjure a roster.
+func TestRunDuePreEventWithNobodyAttendingWritesNothingAndCompletes(t *testing.T) {
+	jobID := uuid.New()
+	channelID := int64(42)
+	store := &fakeReminderStore{
+		event: Event{Title: "Prog Night", ChannelID: &channelID},
+		jobs:  []db.ScheduledJob{{ID: jobID, JobType: db.JobEnumREMINDERPREEVENT}},
+	}
+
+	if err := NewRunner(store, newTestLogger()).RunDue(context.Background(), 10); err != nil {
+		t.Fatalf("RunDue: %v", err)
+	}
+
+	if len(store.notified) != 0 {
+		t.Errorf("notified = %d, want 0", len(store.notified))
+	}
+	if len(store.sentIDs) != 1 || store.sentIDs[0] != jobID {
+		t.Errorf("sent = %v, want [%s]", store.sentIDs, jobID)
+	}
+}
+
+// The bot posts the event message after the event exists, so an event can reach its
+// reminder with no channel on file. There is nowhere to ping, and inventing one is
+// worse than saying nothing.
+func TestRunDuePreEventPingWithNoChannelWritesNothing(t *testing.T) {
+	store := &fakeReminderStore{
+		event:     Event{Title: "Prog Night"},
+		jobs:      []db.ScheduledJob{{ID: uuid.New(), JobType: db.JobEnumREMINDERPREEVENT}},
+		attending: []AttendingSignup{{DiscordID: 1}},
+	}
+
+	if err := NewRunner(store, newTestLogger()).RunDue(context.Background(), 10); err != nil {
+		t.Fatalf("RunDue: %v", err)
+	}
+
+	if len(store.notified) != 0 {
+		t.Errorf("notified = %d, want 0", len(store.notified))
 	}
 }
 

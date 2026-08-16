@@ -2,8 +2,8 @@
 -- difficulty is NULL for MYTHIC_PLUS events, which have no difficulty of their own.
 -- For a raid it decides the comp size rule, so the assigner cannot tell a Mythic
 -- raid from a flex one without it.
-INSERT INTO events (id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO events (id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING *;
 
 -- name: SetEventDifficulty :exec
@@ -21,7 +21,8 @@ UPDATE events SET
     comp_template = COALESCE(sqlc.narg(comp_template), comp_template),
     difficulty = COALESCE(sqlc.narg(difficulty), difficulty),
     message_id = COALESCE(sqlc.narg(message_id), message_id),
-    channel_id = COALESCE(sqlc.narg(channel_id), channel_id)
+    channel_id = COALESCE(sqlc.narg(channel_id), channel_id),
+    reminder_lead_minutes = COALESCE(sqlc.narg(reminder_lead_minutes), reminder_lead_minutes)
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
@@ -88,15 +89,21 @@ WHERE e.id = $1
   )
 ORDER BY u.discord_id;
 
--- name: ListConfirmedWithRole :many
--- assigned_role IS NOT NULL rather than status = 'CONFIRMED': the assignment pool is
--- CONFIRMED and LATE both (design.md section 5), and REMINDER_1H is for whoever
--- actually holds a seat, not for whoever merely confirmed.
-SELECT u.discord_id, s.assigned_role
+-- name: ListAttendingForEvent :many
+-- Everyone who said they are turning up, seated or not. The pre-event reminder does not
+-- read the comp: a raider left out of a locked twenty still wants to know the raid is
+-- about to pull, and an unlocked event has no assignments at all.
+--
+-- DISTINCT ON collapses a person's alts to one row, preferring the alt that holds a
+-- seat so the DM can still name a role. Without it, four signed-up alts is four pings
+-- of the same person.
+SELECT DISTINCT ON (u.discord_id) u.discord_id, s.assigned_role
 FROM signups s
 JOIN characters c ON c.id = s.character_id
 JOIN users u ON u.id = c.user_id
-WHERE s.event_id = $1 AND s.assigned_role IS NOT NULL;
+WHERE s.event_id = $1
+  AND s.status IN ('CONFIRMED', 'LATE', 'TENTATIVE')
+ORDER BY u.discord_id, (s.assigned_role IS NULL);
 
 -- name: CountCompSlotsForEvent :one
 SELECT count(*) FROM comp_slots WHERE event_id = $1;

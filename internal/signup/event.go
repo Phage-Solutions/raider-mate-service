@@ -22,6 +22,11 @@ type Event struct {
 	MessageID      *int64
 	ChannelID      *int64
 	Difficulty     *db.RaidDifficulty
+	// ReminderLeadMinutes is how long before StartsAt the pre-event reminder fires,
+	// resolved at creation and stored, so a later settings change cannot re-time an
+	// event that is already posted. Zero means no reminder. Nil only on events created
+	// before the setting existed.
+	ReminderLeadMinutes *int32
 }
 
 // CreateEventInput is what a raid lead POSTs to create an event.
@@ -33,20 +38,24 @@ type CreateEventInput struct {
 	SignupDeadline time.Time
 	CompTemplate   []byte
 	Difficulty     *db.RaidDifficulty
+	// ReminderLeadMinutes is nil when the raid lead did not say, and the store resolves
+	// it from the guild settings.
+	ReminderLeadMinutes *int32
 }
 
 // UpdateEventInput is a partial edit: a nil field leaves the stored value alone. A
 // message_id/channel_id-only edit (the bot learning its own post) is a legal,
 // common case, and must not disturb the schedule.
 type UpdateEventInput struct {
-	ID             uuid.UUID
-	Title          *string
-	StartsAt       *time.Time
-	SignupDeadline *time.Time
-	CompTemplate   []byte
-	Difficulty     *db.RaidDifficulty
-	MessageID      *int64
-	ChannelID      *int64
+	ID                  uuid.UUID
+	Title               *string
+	StartsAt            *time.Time
+	SignupDeadline      *time.Time
+	CompTemplate        []byte
+	Difficulty          *db.RaidDifficulty
+	MessageID           *int64
+	ChannelID           *int64
+	ReminderLeadMinutes *int32
 }
 
 // eventStore is the persistence Events needs. Declared here, by the consumer.
@@ -98,9 +107,9 @@ func (e *Events) ListUpcoming(ctx context.Context, discordGuildID int64) ([]Even
 }
 
 // Update applies a partial edit. Reschedule-on-edit (design.md section 6) happens
-// inside the store transaction whenever StartsAt or SignupDeadline is part of the
-// edit: every PENDING job for the event is canceled and the schedule recomputed from
-// the new times.
+// inside the store transaction whenever StartsAt, SignupDeadline or
+// ReminderLeadMinutes is part of the edit: every PENDING job for the event is canceled
+// and the schedule recomputed from the new times.
 func (e *Events) Update(ctx context.Context, in UpdateEventInput) (Event, error) {
 	event, err := e.store.UpdateEvent(ctx, in)
 	if err != nil {

@@ -75,6 +75,12 @@ func parseCompMode(s string) (db.CompMode, error) {
 	return parseEnum(s, []db.CompMode{db.CompModeAUTO, db.CompModeMANUAL}, "mode")
 }
 
+func parseReminderDelivery(s string) (db.ReminderDelivery, error) {
+	return parseEnum(s, []db.ReminderDelivery{
+		db.ReminderDeliveryPING, db.ReminderDeliveryDM, db.ReminderDeliveryBOTH,
+	}, "reminder_delivery")
+}
+
 func parseChannelType(s string) (db.DiscordChannelType, error) {
 	return parseEnum(s, []db.DiscordChannelType{
 		db.DiscordChannelTypeTEXT, db.DiscordChannelTypeANNOUNCEMENT, db.DiscordChannelTypeVOICE,

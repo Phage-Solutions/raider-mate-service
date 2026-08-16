@@ -3,6 +3,8 @@ package signup
 import (
 	"context"
 	"fmt"
+
+	"github.com/Phage-Solutions/raider-mate-service/internal/db"
 )
 
 // GuildSettings is a guild's bot configuration. Every field is optional: a guild that
@@ -22,6 +24,37 @@ type GuildSettings struct {
 	EventMentionRoleIDs []int64
 	// EventBannerURL is artwork shown under the roster. Nil for a plain card.
 	EventBannerURL *string
+	// ReminderLeadMinutes is how long before the start the pre-event reminder fires for
+	// an event that did not set its own. Nil means DefaultReminderLeadMinutes.
+	ReminderLeadMinutes *int32
+	// ReminderDelivery is how that reminder reaches people. Nil means
+	// DefaultReminderDelivery.
+	ReminderDelivery *db.ReminderDelivery
+}
+
+// DefaultReminderLeadMinutes and DefaultReminderDelivery are what a guild gets before
+// it configures anything. They live here rather than as column defaults so a NULL
+// column reads the same everywhere.
+const DefaultReminderLeadMinutes int32 = 30
+
+// DefaultReminderDelivery pings the events channel rather than DMing, because a DM five
+// minutes before a pull is the one nobody sees.
+const DefaultReminderDelivery = db.ReminderDeliveryPING
+
+// ReminderLead returns the lead time to use for an event that named none.
+func (s GuildSettings) ReminderLead() int32 {
+	if s.ReminderLeadMinutes == nil {
+		return DefaultReminderLeadMinutes
+	}
+	return *s.ReminderLeadMinutes
+}
+
+// Delivery returns how the guild wants its pre-event reminder delivered.
+func (s GuildSettings) Delivery() db.ReminderDelivery {
+	if s.ReminderDelivery == nil {
+		return DefaultReminderDelivery
+	}
+	return *s.ReminderDelivery
 }
 
 // guildSettingsStore is the persistence Settings needs. Declared here, by the consumer.

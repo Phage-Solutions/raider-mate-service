@@ -6,8 +6,8 @@
 -- notifications_roster_updated_pending: the second character to change on the same
 -- raid finds a redraw already queued and adds nothing. It is inert for every other
 -- kind, since the partial index does not cover them and the id comes from db.NewID.
-INSERT INTO notifications (id, discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, channel_id, payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO notifications (id, discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, discord_ids, channel_id, payload)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT DO NOTHING;
 
 -- name: ListEventsNeedingRosterRedraw :many

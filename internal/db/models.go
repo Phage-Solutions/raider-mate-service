@@ -146,10 +146,10 @@ func (ns NullEventType) Value() (driver.Value, error) {
 type JobEnum string
 
 const (
-	JobEnumSIGNUPDEADLINE JobEnum = "SIGNUP_DEADLINE"
-	JobEnumREMINDER24H    JobEnum = "REMINDER_24H"
-	JobEnumREMINDER1H     JobEnum = "REMINDER_1H"
-	JobEnumCOMPNAG        JobEnum = "COMP_NAG"
+	JobEnumSIGNUPDEADLINE   JobEnum = "SIGNUP_DEADLINE"
+	JobEnumREMINDER24H      JobEnum = "REMINDER_24H"
+	JobEnumREMINDERPREEVENT JobEnum = "REMINDER_PRE_EVENT"
+	JobEnumCOMPNAG          JobEnum = "COMP_NAG"
 )
 
 func (e *JobEnum) Scan(src interface{}) error {
@@ -235,7 +235,7 @@ type NotificationKind string
 
 const (
 	NotificationKindREMINDER24H      NotificationKind = "REMINDER_24H"
-	NotificationKindREMINDER1H       NotificationKind = "REMINDER_1H"
+	NotificationKindREMINDERPREEVENT NotificationKind = "REMINDER_PRE_EVENT"
 	NotificationKindSIGNUPDEADLINE   NotificationKind = "SIGNUP_DEADLINE"
 	NotificationKindCOMPNAG          NotificationKind = "COMP_NAG"
 	NotificationKindLATEREQUESTFILED NotificationKind = "LATE_REQUEST_FILED"
@@ -284,6 +284,7 @@ const (
 	NotificationTargetUSER    NotificationTarget = "USER"
 	NotificationTargetROLE    NotificationTarget = "ROLE"
 	NotificationTargetMESSAGE NotificationTarget = "MESSAGE"
+	NotificationTargetCHANNEL NotificationTarget = "CHANNEL"
 )
 
 func (e *NotificationTarget) Scan(src interface{}) error {
@@ -362,6 +363,49 @@ func (ns NullRaidDifficulty) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.RaidDifficulty), nil
+}
+
+type ReminderDelivery string
+
+const (
+	ReminderDeliveryPING ReminderDelivery = "PING"
+	ReminderDeliveryDM   ReminderDelivery = "DM"
+	ReminderDeliveryBOTH ReminderDelivery = "BOTH"
+)
+
+func (e *ReminderDelivery) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ReminderDelivery(s)
+	case string:
+		*e = ReminderDelivery(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ReminderDelivery: %T", src)
+	}
+	return nil
+}
+
+type NullReminderDelivery struct {
+	ReminderDelivery ReminderDelivery
+	Valid            bool // Valid is true if ReminderDelivery is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullReminderDelivery) Scan(value interface{}) error {
+	if value == nil {
+		ns.ReminderDelivery, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ReminderDelivery.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullReminderDelivery) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ReminderDelivery), nil
 }
 
 type RequestState string
@@ -546,16 +590,17 @@ type CompSlot struct {
 }
 
 type Event struct {
-	ID             uuid.UUID
-	DiscordGuildID int64
-	Type           EventType
-	Title          string
-	StartsAt       pgtype.Timestamptz
-	SignupDeadline pgtype.Timestamptz
-	CompTemplate   []byte
-	MessageID      *int64
-	ChannelID      *int64
-	Difficulty     *RaidDifficulty
+	ID                  uuid.UUID
+	DiscordGuildID      int64
+	Type                EventType
+	Title               string
+	StartsAt            pgtype.Timestamptz
+	SignupDeadline      pgtype.Timestamptz
+	CompTemplate        []byte
+	MessageID           *int64
+	ChannelID           *int64
+	Difficulty          *RaidDifficulty
+	ReminderLeadMinutes *int32
 }
 
 type GuildChannel struct {
@@ -585,6 +630,8 @@ type GuildSetting struct {
 	Timezone            *string
 	EventMentionRoleIds []int64
 	EventBannerUrl      *string
+	ReminderLeadMinutes *int32
+	ReminderDelivery    *ReminderDelivery
 }
 
 type LateSignupRequest struct {
@@ -612,6 +659,7 @@ type Notification struct {
 	CreatedAt      pgtype.Timestamptz
 	DeliveredAt    pgtype.Timestamptz
 	ClaimedAt      pgtype.Timestamptz
+	DiscordIds     []int64
 }
 
 type ScheduledJob struct {

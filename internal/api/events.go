@@ -21,7 +21,10 @@ type eventResponse struct {
 	MessageID      *string         `json:"message_id,omitempty"`
 	ChannelID      *string         `json:"channel_id,omitempty"`
 	Difficulty     *string         `json:"difficulty,omitempty"`
-	Links          Links           `json:"_links"`
+	// ReminderLeadMinutes is the resolved lead time rather than what the caller asked
+	// for: a create that named none reads back the guild default. 0 means no reminder.
+	ReminderLeadMinutes *int32 `json:"reminder_lead_minutes,omitempty"`
+	Links               Links  `json:"_links"`
 }
 
 func eventToResponse(e signup.Event, actor Actor) eventResponse {
@@ -45,7 +48,9 @@ func eventToResponse(e signup.Event, actor Actor) eventResponse {
 		MessageID:      snowflakePtrToString(e.MessageID),
 		ChannelID:      snowflakePtrToString(e.ChannelID),
 		Difficulty:     raidDifficultyToString(e.Difficulty),
-		Links:          links,
+
+		ReminderLeadMinutes: e.ReminderLeadMinutes,
+		Links:               links,
 	}
 }
 
@@ -83,6 +88,16 @@ type createEventRequest struct {
 	SignupDeadline time.Time       `json:"signup_deadline"`
 	CompTemplate   json.RawMessage `json:"comp_template"`
 	Difficulty     *string         `json:"difficulty,omitempty"`
+	// ReminderLeadMinutes omitted means the guild default. 0 means no reminder.
+	ReminderLeadMinutes *int32 `json:"reminder_lead_minutes,omitempty"`
+}
+
+// maxReminderLeadMinutes is a day. Past that the 24-hour reminder is the one that
+// should be moving, and a lead longer than the notice a raid gets fires immediately.
+const maxReminderLeadMinutes int32 = 1440
+
+func validReminderLead(minutes *int32) bool {
+	return minutes == nil || (*minutes >= 0 && *minutes <= maxReminderLeadMinutes)
 }
 
 // createEventHandler creates an event and, in the same store transaction, schedules
@@ -126,6 +141,12 @@ func createEventHandler(events *signup.Events, logger *slog.Logger) http.Handler
 			difficulty = &d
 		}
 
+		if !validReminderLead(body.ReminderLeadMinutes) {
+			writeError(w, logger, http.StatusBadRequest,
+				"reminder_lead_minutes must be between 0 and 1440")
+			return
+		}
+
 		event, err := events.Create(r.Context(), signup.CreateEventInput{
 			DiscordGuildID: guildID,
 			Type:           eventType,
@@ -134,6 +155,8 @@ func createEventHandler(events *signup.Events, logger *slog.Logger) http.Handler
 			SignupDeadline: body.SignupDeadline,
 			CompTemplate:   compTemplate,
 			Difficulty:     difficulty,
+
+			ReminderLeadMinutes: body.ReminderLeadMinutes,
 		})
 		if err != nil {
 			logger.ErrorContext(r.Context(), "creating event", "error", err)
@@ -199,12 +222,14 @@ type updateEventRequest struct {
 	Difficulty     *string         `json:"difficulty,omitempty"`
 	MessageID      *string         `json:"message_id,omitempty"`
 	ChannelID      *string         `json:"channel_id,omitempty"`
+
+	ReminderLeadMinutes *int32 `json:"reminder_lead_minutes,omitempty"`
 }
 
 // patchEventHandler applies a partial edit. Raid lead only. Rescheduling on a
-// starts_at/signup_deadline change happens inside Events.Update's store
-// transaction; message_id/channel_id (the bot learning its own post) never touches
-// scheduled_jobs.
+// starts_at/signup_deadline/reminder_lead_minutes change happens inside Events.Update's
+// store transaction; message_id/channel_id (the bot learning its own post) never
+// touches scheduled_jobs.
 func patchEventHandler(events *signup.Events, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
@@ -244,6 +269,11 @@ func patchEventHandler(events *signup.Events, logger *slog.Logger) http.HandlerF
 			d := db.RaidDifficulty(*body.Difficulty)
 			difficulty = &d
 		}
+		if !validReminderLead(body.ReminderLeadMinutes) {
+			writeError(w, logger, http.StatusBadRequest,
+				"reminder_lead_minutes must be between 0 and 1440")
+			return
+		}
 
 		event, err := events.Update(r.Context(), signup.UpdateEventInput{
 			ID:             id,
@@ -254,6 +284,8 @@ func patchEventHandler(events *signup.Events, logger *slog.Logger) http.HandlerF
 			Difficulty:     difficulty,
 			MessageID:      messageID,
 			ChannelID:      channelID,
+
+			ReminderLeadMinutes: body.ReminderLeadMinutes,
 		})
 		if err != nil {
 			logger.ErrorContext(r.Context(), "updating event", "error", err)

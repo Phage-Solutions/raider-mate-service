@@ -357,6 +357,37 @@ func TestSyncDueRateLimitedAbortsBatch(t *testing.T) {
 	}
 }
 
+func TestSyncDueInvalidAPIKeyAbortsBatch(t *testing.T) {
+	first, second := uuid.New(), uuid.New()
+	calls := 0
+
+	store := &fakeStore{
+		due: []db.Character{
+			{ID: first, Region: "eu", Realm: "ravencrest", Name: "Danthrax"},
+			{ID: second, Region: "eu", Realm: "ravencrest", Name: "Alt"},
+		},
+	}
+	fetcher := fetcherFunc(func(context.Context, string, string, string) (raiderio.Profile, error) {
+		calls++
+		return raiderio.Profile{}, raiderio.ErrInvalidAPIKey
+	})
+
+	s := NewSyncer(fetcher, store, testLogger())
+	err := s.SyncDue(context.Background(), time.Hour, 10)
+	if !errors.Is(err, raiderio.ErrInvalidAPIKey) {
+		t.Fatalf("err = %v, want ErrInvalidAPIKey", err)
+	}
+
+	if calls != 1 {
+		t.Errorf("fetches = %d, want 1: a rejected key rejects the rest of the batch too", calls)
+	}
+	// Marking them would push the whole batch a staleAfter into the future over a
+	// misconfigured key, so a corrected key would not take effect until then.
+	if len(store.attempted) != 0 {
+		t.Errorf("attempted = %v, want none: nothing was learned about the character", store.attempted)
+	}
+}
+
 func TestSyncDueInvalidRequestDoesNotTouch(t *testing.T) {
 	id := uuid.New()
 	store := &fakeStore{due: []db.Character{{ID: id, Region: "moon", Realm: "ravencrest", Name: "Danthrax"}}}

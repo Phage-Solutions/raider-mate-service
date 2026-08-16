@@ -24,22 +24,23 @@ func (q *Queries) CountCompSlotsForEvent(ctx context.Context, eventID uuid.UUID)
 }
 
 const createEvent = `-- name: CreateEvent :one
-INSERT INTO events (id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty
+INSERT INTO events (id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes
 `
 
 type CreateEventParams struct {
-	ID             uuid.UUID
-	DiscordGuildID int64
-	Type           EventType
-	Title          string
-	StartsAt       pgtype.Timestamptz
-	SignupDeadline pgtype.Timestamptz
-	CompTemplate   []byte
-	MessageID      *int64
-	ChannelID      *int64
-	Difficulty     *RaidDifficulty
+	ID                  uuid.UUID
+	DiscordGuildID      int64
+	Type                EventType
+	Title               string
+	StartsAt            pgtype.Timestamptz
+	SignupDeadline      pgtype.Timestamptz
+	CompTemplate        []byte
+	MessageID           *int64
+	ChannelID           *int64
+	Difficulty          *RaidDifficulty
+	ReminderLeadMinutes *int32
 }
 
 // difficulty is NULL for MYTHIC_PLUS events, which have no difficulty of their own.
@@ -57,6 +58,7 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (Event
 		arg.MessageID,
 		arg.ChannelID,
 		arg.Difficulty,
+		arg.ReminderLeadMinutes,
 	)
 	var i Event
 	err := row.Scan(
@@ -70,6 +72,7 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (Event
 		&i.MessageID,
 		&i.ChannelID,
 		&i.Difficulty,
+		&i.ReminderLeadMinutes,
 	)
 	return i, err
 }
@@ -115,7 +118,7 @@ func (q *Queries) DeleteSignup(ctx context.Context, arg DeleteSignupParams) erro
 }
 
 const getEvent = `-- name: GetEvent :one
-SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty FROM events
+SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes FROM events
 WHERE id = $1
 `
 
@@ -133,6 +136,7 @@ func (q *Queries) GetEvent(ctx context.Context, id uuid.UUID) (Event, error) {
 		&i.MessageID,
 		&i.ChannelID,
 		&i.Difficulty,
+		&i.ReminderLeadMinutes,
 	)
 	return i, err
 }
@@ -161,31 +165,37 @@ func (q *Queries) GetLateRequest(ctx context.Context, id uuid.UUID) (LateSignupR
 	return i, err
 }
 
-const listConfirmedWithRole = `-- name: ListConfirmedWithRole :many
-SELECT u.discord_id, s.assigned_role
+const listAttendingForEvent = `-- name: ListAttendingForEvent :many
+SELECT DISTINCT ON (u.discord_id) u.discord_id, s.assigned_role
 FROM signups s
 JOIN characters c ON c.id = s.character_id
 JOIN users u ON u.id = c.user_id
-WHERE s.event_id = $1 AND s.assigned_role IS NOT NULL
+WHERE s.event_id = $1
+  AND s.status IN ('CONFIRMED', 'LATE', 'TENTATIVE')
+ORDER BY u.discord_id, (s.assigned_role IS NULL)
 `
 
-type ListConfirmedWithRoleRow struct {
+type ListAttendingForEventRow struct {
 	DiscordID    int64
 	AssignedRole *RoleEnum
 }
 
-// assigned_role IS NOT NULL rather than status = 'CONFIRMED': the assignment pool is
-// CONFIRMED and LATE both (design.md section 5), and REMINDER_1H is for whoever
-// actually holds a seat, not for whoever merely confirmed.
-func (q *Queries) ListConfirmedWithRole(ctx context.Context, eventID uuid.UUID) ([]ListConfirmedWithRoleRow, error) {
-	rows, err := q.db.Query(ctx, listConfirmedWithRole, eventID)
+// Everyone who said they are turning up, seated or not. The pre-event reminder does not
+// read the comp: a raider left out of a locked twenty still wants to know the raid is
+// about to pull, and an unlocked event has no assignments at all.
+//
+// DISTINCT ON collapses a person's alts to one row, preferring the alt that holds a
+// seat so the DM can still name a role. Without it, four signed-up alts is four pings
+// of the same person.
+func (q *Queries) ListAttendingForEvent(ctx context.Context, eventID uuid.UUID) ([]ListAttendingForEventRow, error) {
+	rows, err := q.db.Query(ctx, listAttendingForEvent, eventID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListConfirmedWithRoleRow
+	var items []ListAttendingForEventRow
 	for rows.Next() {
-		var i ListConfirmedWithRoleRow
+		var i ListAttendingForEventRow
 		if err := rows.Scan(&i.DiscordID, &i.AssignedRole); err != nil {
 			return nil, err
 		}
@@ -314,7 +324,7 @@ func (q *Queries) ListUndecidedForEvent(ctx context.Context, id uuid.UUID) ([]in
 }
 
 const listUpcomingEvents = `-- name: ListUpcomingEvents :many
-SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty FROM events
+SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes FROM events
 WHERE discord_guild_id = $1 AND starts_at >= now()
 ORDER BY starts_at ASC
 `
@@ -339,6 +349,7 @@ func (q *Queries) ListUpcomingEvents(ctx context.Context, discordGuildID int64) 
 			&i.MessageID,
 			&i.ChannelID,
 			&i.Difficulty,
+			&i.ReminderLeadMinutes,
 		); err != nil {
 			return nil, err
 		}
@@ -373,20 +384,22 @@ UPDATE events SET
     comp_template = COALESCE($4, comp_template),
     difficulty = COALESCE($5, difficulty),
     message_id = COALESCE($6, message_id),
-    channel_id = COALESCE($7, channel_id)
-WHERE id = $8
-RETURNING id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty
+    channel_id = COALESCE($7, channel_id),
+    reminder_lead_minutes = COALESCE($8, reminder_lead_minutes)
+WHERE id = $9
+RETURNING id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes
 `
 
 type UpdateEventParams struct {
-	Title          *string
-	StartsAt       pgtype.Timestamptz
-	SignupDeadline pgtype.Timestamptz
-	CompTemplate   []byte
-	Difficulty     *RaidDifficulty
-	MessageID      *int64
-	ChannelID      *int64
-	ID             uuid.UUID
+	Title               *string
+	StartsAt            pgtype.Timestamptz
+	SignupDeadline      pgtype.Timestamptz
+	CompTemplate        []byte
+	Difficulty          *RaidDifficulty
+	MessageID           *int64
+	ChannelID           *int64
+	ReminderLeadMinutes *int32
+	ID                  uuid.UUID
 }
 
 // Partial update: a field left NULL keeps its stored value, same COALESCE pattern as
@@ -401,6 +414,7 @@ func (q *Queries) UpdateEvent(ctx context.Context, arg UpdateEventParams) (Event
 		arg.Difficulty,
 		arg.MessageID,
 		arg.ChannelID,
+		arg.ReminderLeadMinutes,
 		arg.ID,
 	)
 	var i Event
@@ -415,6 +429,7 @@ func (q *Queries) UpdateEvent(ctx context.Context, arg UpdateEventParams) (Event
 		&i.MessageID,
 		&i.ChannelID,
 		&i.Difficulty,
+		&i.ReminderLeadMinutes,
 	)
 	return i, err
 }

@@ -219,7 +219,7 @@ character_snapshots (
 scheduled_jobs (
   id          uuid PK,
   event_id    uuid FK,
-  job_type    job_enum,   -- SIGNUP_DEADLINE | REMINDER_24H | REMINDER_1H | COMP_NAG
+  job_type    job_enum,   -- SIGNUP_DEADLINE | REMINDER_24H | REMINDER_PRE_EVENT | COMP_NAG
   run_at      timestamptz,
   status      job_status, -- PENDING | SENT | FAILED | CANCELED
   attempts    smallint
@@ -382,9 +382,23 @@ edit/delete rather than validating at fire time.
 | Job | Behaviour |
 |---|---|
 | `REMINDER_24H` | DM the **undecided only**. Don't ping people who already signed |
-| `REMINDER_1H` | DM confirmed roster with their assigned role |
+| `REMINDER_PRE_EVENT` | Tell **everyone signed up** the event is about to start |
 | `SIGNUP_DEADLINE` | Lock signups, ping raid lead that comp needs finalising |
 | `COMP_NAG` | Ping raid lead if comp isn't locked 2h out |
+
+`REMINDER_PRE_EVENT` is the one job whose timing a guild controls.
+`events.reminder_lead_minutes` is resolved when the event is created, from the request,
+then `guild_settings.reminder_lead_minutes`, then 30, and stored on the event: a later
+settings change must not re-time a raid that is already posted. Zero schedules no job at
+all. An edit that moves `starts_at`, `signup_deadline` or the lead time cancels and
+recomputes, like any other reschedule.
+
+Its recipients are every distinct user with a `CONFIRMED`, `LATE` or `TENTATIVE` signup,
+which is deliberately not the comp: a raider with no seat still turns up, and an
+unlocked event has assigned nobody. `guild_settings.reminder_delivery` chooses between
+one `CHANNEL` notification mentioning them all (the default), a `USER` notification
+each, or both. Only the DM names an assigned role, and only when the raider holds a
+seat.
 
 After `signup_deadline`, signups go read-only for players; raid leads can still add
 manually. Late signups land in a requests queue rather than silently failing.

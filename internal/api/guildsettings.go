@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Phage-Solutions/raider-mate-service/internal/db"
 	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
 )
 
@@ -19,7 +20,12 @@ type guildSettingsResponse struct {
 	// guild can deliberately be in.
 	EventMentionRoleIDs []string `json:"event_mention_role_ids"`
 	EventBannerURL      *string  `json:"event_banner_url,omitempty"`
-	Links               Links    `json:"_links"`
+	// ReminderLeadMinutes and ReminderDelivery are omitted when the guild has chosen
+	// neither, which is not the same as choosing the defaults: a client showing the
+	// setting needs to say "default" rather than claim the guild picked 30.
+	ReminderLeadMinutes *int32  `json:"reminder_lead_minutes,omitempty"`
+	ReminderDelivery    *string `json:"reminder_delivery,omitempty"`
+	Links               Links   `json:"_links"`
 }
 
 type guildSettingsRequest struct {
@@ -27,6 +33,8 @@ type guildSettingsRequest struct {
 	Timezone            *string  `json:"timezone,omitempty"`
 	EventMentionRoleIDs []string `json:"event_mention_role_ids,omitempty"`
 	EventBannerURL      *string  `json:"event_banner_url,omitempty"`
+	ReminderLeadMinutes *int32   `json:"reminder_lead_minutes,omitempty"`
+	ReminderDelivery    *string  `json:"reminder_delivery,omitempty"`
 }
 
 // guildSettingsLinks gates the write on admin and leaves the read open to the guild.
@@ -46,8 +54,18 @@ func settingsToResponse(settings signup.GuildSettings, guildID int64, isAdmin bo
 		Timezone:            settings.Timezone,
 		EventMentionRoleIDs: snowflakesToStrings(settings.EventMentionRoleIDs),
 		EventBannerURL:      settings.EventBannerURL,
+		ReminderLeadMinutes: settings.ReminderLeadMinutes,
+		ReminderDelivery:    reminderDeliveryToString(settings.ReminderDelivery),
 		Links:               guildSettingsLinks(guildID, isAdmin),
 	}
+}
+
+func reminderDeliveryToString(d *db.ReminderDelivery) *string {
+	if d == nil {
+		return nil
+	}
+	s := string(*d)
+	return &s
 }
 
 // getGuildSettingsHandler returns a guild's bot configuration. Readable by any member:
@@ -129,9 +147,26 @@ func putGuildSettingsHandler(settings *signup.Settings, logger *slog.Logger) htt
 			return
 		}
 
+		if !validReminderLead(body.ReminderLeadMinutes) {
+			writeError(w, logger, http.StatusBadRequest,
+				"reminder_lead_minutes must be between 0 and 1440")
+			return
+		}
+
+		var delivery *db.ReminderDelivery
+		if body.ReminderDelivery != nil && *body.ReminderDelivery != "" {
+			parsed, err := parseReminderDelivery(*body.ReminderDelivery)
+			if err != nil {
+				writeError(w, logger, http.StatusBadRequest, err.Error())
+				return
+			}
+			delivery = &parsed
+		}
+
 		written, err := settings.Replace(r.Context(), signup.GuildSettings{
 			DiscordGuildID: guildID, EventsChannelID: channelID, Timezone: timezone,
 			EventMentionRoleIDs: mentionRoleIDs, EventBannerURL: bannerURL,
+			ReminderLeadMinutes: body.ReminderLeadMinutes, ReminderDelivery: delivery,
 		})
 		if err != nil {
 			logger.ErrorContext(r.Context(), "writing guild settings", "error", err)

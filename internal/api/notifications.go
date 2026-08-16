@@ -23,9 +23,12 @@ type notificationResponse struct {
 	TargetKind     string   `json:"target_kind"`
 	DiscordID      *string  `json:"discord_id,omitempty"`
 	RoleIDs        []string `json:"role_ids,omitempty"`
-	ChannelID      *string  `json:"channel_id,omitempty"`
-	Payload        rawJSON  `json:"payload"`
-	Links          Links    `json:"_links"`
+	// DiscordIDs are the users a CHANNEL notification mentions, kept apart from RoleIDs
+	// because the two render with different mention syntax.
+	DiscordIDs []string `json:"discord_ids,omitempty"`
+	ChannelID  *string  `json:"channel_id,omitempty"`
+	Payload    rawJSON  `json:"payload"`
+	Links      Links    `json:"_links"`
 }
 
 // rawJSON marshals its bytes verbatim: the payload column is already JSON.
@@ -43,6 +46,10 @@ func notificationToResponse(n signup.StoredNotification) notificationResponse {
 	for i, id := range n.RoleIDs {
 		roleIDs[i] = strconv.FormatInt(id, 10)
 	}
+	discordIDs := make([]string, len(n.DiscordIDs))
+	for i, id := range n.DiscordIDs {
+		discordIDs[i] = strconv.FormatInt(id, 10)
+	}
 
 	links := Links{}
 	links.add(true, "delivered", "/api/notifications/"+n.ID.String()+"/delivered", "POST")
@@ -55,6 +62,7 @@ func notificationToResponse(n signup.StoredNotification) notificationResponse {
 		TargetKind:     string(n.TargetKind),
 		DiscordID:      snowflakePtrToString(n.DiscordID),
 		RoleIDs:        roleIDs,
+		DiscordIDs:     discordIDs,
 		ChannelID:      snowflakePtrToString(n.ChannelID),
 		Payload:        n.Payload,
 		Links:          links,
