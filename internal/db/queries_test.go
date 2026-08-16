@@ -44,12 +44,12 @@ func TestUpsertUserIsIdempotentPerGuild(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
-	userInGuildA, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 1, DiscordGuildID: 100})
+	userInGuildA, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 1, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user in guild A: %v", err)
 	}
 
-	userInGuildB, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 1, DiscordGuildID: 200})
+	userInGuildB, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 1, DiscordGuildID: 200})
 	if err != nil {
 		t.Fatalf("upserting user in guild B: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestUpsertUserIsIdempotentPerGuild(t *testing.T) {
 		t.Fatalf("same discord id in two guilds got one row, want two")
 	}
 
-	userInGuildAAgain, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 1, DiscordGuildID: 100})
+	userInGuildAAgain, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 1, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user in guild A again: %v", err)
 	}
@@ -70,11 +70,12 @@ func TestCharacterRolesRoundTripInPriorityOrder(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 2, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 2, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Danthrax", Realm: "Area-52", IsMain: true,
 	})
 	if err != nil {
@@ -112,17 +113,19 @@ func TestSignupRejectsDuplicateCharacterPerEvent(t *testing.T) {
 	ctx := context.Background()
 	q, tx := newTxQueries(ctx, t)
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 3, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 3, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Bob", Realm: "Area-52", IsMain: true,
 	})
 	if err != nil {
 		t.Fatalf("creating character: %v", err)
 	}
 	event, err := q.CreateEvent(ctx, CreateEventParams{
+		ID:             NewID(),
 		DiscordGuildID: 100,
 		Type:           EventTypeRAID,
 		Title:          "Prog Night",
@@ -134,15 +137,20 @@ func TestSignupRejectsDuplicateCharacterPerEvent(t *testing.T) {
 		t.Fatalf("creating event: %v", err)
 	}
 
-	const insertSignup = `INSERT INTO signups (event_id, character_id, status) VALUES ($1, $2, 'CONFIRMED')`
-	if _, err := tx.Exec(ctx, insertSignup, event.ID, character.ID); err != nil {
+	// A fresh id per attempt, so the violation below is attributable to
+	// UNIQUE (event_id, character_id) and not to the primary key.
+	const insertSignup = `INSERT INTO signups (id, event_id, character_id, status) VALUES ($1, $2, $3, 'CONFIRMED')`
+	if _, err := tx.Exec(ctx, insertSignup, NewID(), event.ID, character.ID); err != nil {
 		t.Fatalf("first signup insert: %v", err)
 	}
 
-	_, err = tx.Exec(ctx, insertSignup, event.ID, character.ID)
+	_, err = tx.Exec(ctx, insertSignup, NewID(), event.ID, character.ID)
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
 		t.Fatalf("second signup insert: got %v, want unique_violation", err)
+	}
+	if pgErr.ConstraintName != "signups_event_id_character_id_key" {
+		t.Errorf("violated constraint = %s, want signups_event_id_character_id_key", pgErr.ConstraintName)
 	}
 }
 
@@ -150,11 +158,12 @@ func TestGetCharacterInGuildRejectsForeignGuild(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 4, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 4, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Sneaky", Realm: "Area-52", IsMain: true,
 	})
 	if err != nil {
@@ -173,18 +182,20 @@ func TestPrimaryKeysAreTimeOrdered(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 5, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 5, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 
 	first, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "First", Realm: "Area-52", IsMain: false,
 	})
 	if err != nil {
 		t.Fatalf("creating first character: %v", err)
 	}
 	second, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Second", Realm: "Area-52", IsMain: false,
 	})
 	if err != nil {
@@ -200,11 +211,12 @@ func TestDeleteCharacterIgnoresAForeignGuild(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 20, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 20, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Doomed", Realm: "Area-52", IsMain: true,
 	})
 	if err != nil {
@@ -238,11 +250,12 @@ func TestDeleteCharacterCascadesToItsRoles(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 21, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 21, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Rolled", Realm: "Area-52", IsMain: true,
 	})
 	if err != nil {
@@ -275,11 +288,12 @@ func TestSetCharacterMainIgnoresAForeignGuild(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 22, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 22, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Alt", Realm: "Area-52", IsMain: false,
 	})
 	if err != nil {

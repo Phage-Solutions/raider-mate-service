@@ -87,6 +87,7 @@ func (s *Store) ApplySync(ctx context.Context, arg applySyncParams) error {
 	}
 
 	if _, err := q.InsertCharacterSnapshot(ctx, db.InsertCharacterSnapshotParams{
+		ID:          db.NewID(),
 		CharacterID: arg.characterID,
 		Ilvl:        ilvl,
 		MplusScore:  score,
@@ -98,8 +99,22 @@ func (s *Store) ApplySync(ctx context.Context, arg applySyncParams) error {
 	// In the same transaction as the snapshot: a raid message is only asked to redraw
 	// for data that actually landed. ApplySync runs only when the syncer found a real
 	// difference, so this does not fire on a no-op refresh.
-	if _, err := q.InsertRosterUpdatedNotifications(ctx, arg.characterID); err != nil {
-		return fmt.Errorf("queueing roster redraws: %w", err)
+	events, err := q.ListEventsNeedingRosterRedraw(ctx, arg.characterID)
+	if err != nil {
+		return fmt.Errorf("listing events needing redraw: %w", err)
+	}
+	for _, e := range events {
+		if _, err := q.InsertNotification(ctx, db.InsertNotificationParams{
+			ID:             db.NewID(),
+			DiscordGuildID: e.DiscordGuildID,
+			EventID:        e.ID,
+			Kind:           db.NotificationKindROSTERUPDATED,
+			TargetKind:     db.NotificationTargetMESSAGE,
+			ChannelID:      e.ChannelID,
+			Payload:        []byte("{}"),
+		}); err != nil {
+			return fmt.Errorf("queueing roster redraw for event %s: %w", e.ID, err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -135,7 +150,7 @@ func numericToFloat64(n pgtype.Numeric) (float64, error) {
 }
 
 func (s *Store) UpsertUser(ctx context.Context, discordID, discordGuildID int64) (uuid.UUID, error) {
-	user, err := s.queries.UpsertUser(ctx, db.UpsertUserParams{DiscordID: discordID, DiscordGuildID: discordGuildID})
+	user, err := s.queries.UpsertUser(ctx, db.UpsertUserParams{ID: db.NewID(), DiscordID: discordID, DiscordGuildID: discordGuildID})
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -144,6 +159,7 @@ func (s *Store) UpsertUser(ctx context.Context, discordID, discordGuildID int64)
 
 func (s *Store) CreateCharacter(ctx context.Context, userID uuid.UUID, in RegisterInput) (Character, error) {
 	row, err := s.queries.CreateCharacter(ctx, db.CreateCharacterParams{
+		ID:     db.NewID(),
 		UserID: userID, Name: in.Name, Realm: in.Realm, Region: in.Region, IsMain: in.IsMain,
 	})
 	if err != nil {

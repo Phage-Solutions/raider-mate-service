@@ -60,9 +60,8 @@ type eventStore interface {
 
 // Events creates, edits, and deletes events, keeping scheduled_jobs in step with
 // them. The schedule math (jobsFor) and the cancel-and-reschedule transaction live in
-// the store rather than here: an event's UUIDv7 is only known once its INSERT
-// returns, so the jobs that reference it cannot be computed and inserted as a second,
-// separate round trip without risking an event with no reminders if that second call
+// the store rather than here, so the event and the jobs that reference it commit
+// together: a second, separate round trip risks an event with no reminders if it
 // fails.
 type Events struct {
 	store eventStore

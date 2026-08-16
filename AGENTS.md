@@ -53,7 +53,9 @@ Violating these produces broken behaviour, not just untidy code.
 2. **Roles live on the character, not the signup.** Signup means "I am coming, here is
    my role menu". Assignment happens later. This is the core domain rule and both
    client repos depend on the API reflecting it correctly.
-3. **UUIDv7 primary keys.** Discord snowflakes stay `bigint` in separate columns.
+3. **UUIDv7 primary keys, generated in Go.** `db.NewID()`, never by the database:
+   no uuid column carries a `DEFAULT`. Discord snowflakes stay `bigint` in separate
+   columns.
 4. **Never delete data on subscription lapse.** Hide it behind an upsell state.
 5. **Never call Raider.IO from a request handler.** Read cached values. Refresh
    happens in a background job.
@@ -173,7 +175,7 @@ against it, then exercise real SQL.
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 	pgContainer, err := postgres.Run(ctx,
-		"postgres:18-alpine", // uuidv7() is native starting here
+		"postgres:17-alpine",
 		postgres.WithDatabase("raidermate_test"),
 		postgres.WithUsername("test"),
 		postgres.WithPassword("test"),

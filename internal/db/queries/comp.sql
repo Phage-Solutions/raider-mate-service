@@ -22,8 +22,8 @@ ORDER BY character_id, priority, role;
 -- Creating a comp is idempotent, but the mode is set once at creation: flipping an
 -- existing comp between AUTO and MANUAL is SetCompMode's job, so a stray create
 -- cannot quietly hand a raid lead's hand-built comp back to the assigner.
-INSERT INTO comps (event_id, name, mode)
-VALUES ($1, $2, $3)
+INSERT INTO comps (id, event_id, name, mode)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT (event_id, name) DO UPDATE SET name = excluded.name
 RETURNING *;
 
@@ -49,8 +49,8 @@ DELETE FROM comp_slots
 WHERE event_id = $1 AND comp_name = $2;
 
 -- name: InsertCompSlot :exec
-INSERT INTO comp_slots (event_id, comp_name, character_id, role, slot_index, is_bench, reason)
-VALUES ($1, $2, $3, $4, $5, $6, $7);
+INSERT INTO comp_slots (id, event_id, comp_name, character_id, role, slot_index, is_bench, reason)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- name: ListCompSlots :many
 SELECT * FROM comp_slots

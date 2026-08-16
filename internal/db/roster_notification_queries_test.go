@@ -11,17 +11,48 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// queueRosterRedraws is the fan-out roster.Store.ApplySync performs: list the events
+// needing a redraw, then insert one notification apiece. It returns how many rows
+// actually landed, so a suppressed insert is visible to the assertions.
+func queueRosterRedraws(ctx context.Context, t *testing.T, q *Queries, characterID uuid.UUID) int64 {
+	t.Helper()
+
+	events, err := q.ListEventsNeedingRosterRedraw(ctx, characterID)
+	if err != nil {
+		t.Fatalf("listing events needing redraw: %v", err)
+	}
+
+	var queued int64
+	for _, e := range events {
+		rows, err := q.InsertNotification(ctx, InsertNotificationParams{
+			ID:             NewID(),
+			DiscordGuildID: e.DiscordGuildID,
+			EventID:        e.ID,
+			Kind:           NotificationKindROSTERUPDATED,
+			TargetKind:     NotificationTargetMESSAGE,
+			ChannelID:      e.ChannelID,
+			Payload:        []byte(`{}`),
+		})
+		if err != nil {
+			t.Fatalf("queueing redraw for event %s: %v", e.ID, err)
+		}
+		queued += rows
+	}
+	return queued
+}
+
 // seedSignedUpCharacter creates a raider signed up to one event, which is the shape
-// InsertRosterUpdatedNotifications fans out over.
+// the roster redraw fan-out runs over.
 func seedSignedUpCharacter(ctx context.Context, t *testing.T, q *Queries, discordID int64) uuid.UUID {
 	t.Helper()
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: discordID, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: discordID, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
 
 	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Thrallmain", Realm: "silvermoon", Region: "eu", IsMain: true,
 	})
 	if err != nil {
@@ -36,6 +67,7 @@ func seedPostedEvent(ctx context.Context, t *testing.T, q *Queries, startsAt tim
 	t.Helper()
 
 	event, err := q.CreateEvent(ctx, CreateEventParams{
+		ID:             NewID(),
 		DiscordGuildID: 100,
 		Type:           EventTypeRAID,
 		Title:          "Prog Night",
@@ -55,13 +87,14 @@ func signUp(ctx context.Context, t *testing.T, q *Queries, eventID, characterID 
 	t.Helper()
 
 	if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
+		ID:      NewID(),
 		EventID: eventID, CharacterID: characterID, Status: SignupStatusCONFIRMED,
 	}); err != nil {
 		t.Fatalf("signing up: %v", err)
 	}
 }
 
-func TestInsertRosterUpdatedNotificationsOnlyQueuesPostedUpcomingEvents(t *testing.T) {
+func TestRosterRedrawOnlyQueuesPostedUpcomingEvents(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
@@ -75,11 +108,7 @@ func TestInsertRosterUpdatedNotificationsOnlyQueuesPostedUpcomingEvents(t *testi
 		signUp(ctx, t, q, event.ID, characterID)
 	}
 
-	rows, err := q.InsertRosterUpdatedNotifications(ctx, characterID)
-	if err != nil {
-		t.Fatalf("queueing redraws: %v", err)
-	}
-	if rows != 1 {
+	if rows := queueRosterRedraws(ctx, t, q, characterID); rows != 1 {
 		t.Fatalf("queued %d redraws, want 1", rows)
 	}
 
@@ -104,7 +133,7 @@ func TestInsertRosterUpdatedNotificationsOnlyQueuesPostedUpcomingEvents(t *testi
 	}
 }
 
-func TestInsertRosterUpdatedNotificationsCoalescesPerEvent(t *testing.T) {
+func TestRosterRedrawCoalescesPerEvent(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
@@ -116,22 +145,16 @@ func TestInsertRosterUpdatedNotificationsCoalescesPerEvent(t *testing.T) {
 	signUp(ctx, t, q, event.ID, first)
 	signUp(ctx, t, q, event.ID, second)
 
-	if _, err := q.InsertRosterUpdatedNotifications(ctx, first); err != nil {
-		t.Fatalf("queueing first redraw: %v", err)
-	}
+	queueRosterRedraws(ctx, t, q, first)
 
 	// The second raider on the same raid finds a redraw already pending. One message
 	// edit covers both.
-	rows, err := q.InsertRosterUpdatedNotifications(ctx, second)
-	if err != nil {
-		t.Fatalf("queueing second redraw: %v", err)
-	}
-	if rows != 0 {
+	if rows := queueRosterRedraws(ctx, t, q, second); rows != 0 {
 		t.Errorf("queued %d redraws for an event that already had one, want 0", rows)
 	}
 }
 
-func TestInsertRosterUpdatedNotificationsQueuesAgainAfterClaim(t *testing.T) {
+func TestRosterRedrawQueuesAgainAfterClaim(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
@@ -140,20 +163,14 @@ func TestInsertRosterUpdatedNotificationsQueuesAgainAfterClaim(t *testing.T) {
 	characterID := seedSignedUpCharacter(ctx, t, q, 8004)
 	signUp(ctx, t, q, event.ID, characterID)
 
-	if _, err := q.InsertRosterUpdatedNotifications(ctx, characterID); err != nil {
-		t.Fatalf("queueing redraw: %v", err)
-	}
+	queueRosterRedraws(ctx, t, q, characterID)
 	if _, err := q.ClaimNotifications(ctx, claimParams(10, nil)); err != nil {
 		t.Fatalf("claiming: %v", err)
 	}
 
 	// A change arriving while the bot renders cannot be in the message it is building,
 	// so the claimed row must not suppress a fresh redraw.
-	rows, err := q.InsertRosterUpdatedNotifications(ctx, characterID)
-	if err != nil {
-		t.Fatalf("re-queueing redraw: %v", err)
-	}
-	if rows != 1 {
+	if rows := queueRosterRedraws(ctx, t, q, characterID); rows != 1 {
 		t.Errorf("queued %d redraws behind a claimed one, want 1", rows)
 	}
 }

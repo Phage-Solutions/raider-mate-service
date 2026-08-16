@@ -15,6 +15,7 @@ func seedEventForJobs(ctx context.Context, t *testing.T, q *Queries, discordID i
 	t.Helper()
 
 	event, err := q.CreateEvent(ctx, CreateEventParams{
+		ID:             NewID(),
 		DiscordGuildID: 100,
 		Type:           EventTypeRAID,
 		Title:          "Prog Night",
@@ -38,11 +39,13 @@ func TestClaimDueJobsOnlyClaimsPendingAndDue(t *testing.T) {
 	future := time.Now().Add(time.Hour)
 
 	if err := q.ScheduleJob(ctx, ScheduleJobParams{
+		ID:      NewID(),
 		EventID: event.ID, JobType: JobEnumREMINDER24H, RunAt: pgtype.Timestamptz{Time: due, Valid: true},
 	}); err != nil {
 		t.Fatalf("scheduling due job: %v", err)
 	}
 	if err := q.ScheduleJob(ctx, ScheduleJobParams{
+		ID:      NewID(),
 		EventID: event.ID, JobType: JobEnumREMINDER1H, RunAt: pgtype.Timestamptz{Time: future, Valid: true},
 	}); err != nil {
 		t.Fatalf("scheduling future job: %v", err)
@@ -74,6 +77,7 @@ func TestClaimDueJobsUnderConcurrentTransactionsReturnsDisjointSets(t *testing.T
 	due := time.Now().Add(-time.Minute)
 	for range 4 {
 		if err := qSeed.ScheduleJob(ctx, ScheduleJobParams{
+			ID:      NewID(),
 			EventID: event.ID, JobType: JobEnumREMINDER24H, RunAt: pgtype.Timestamptz{Time: due, Valid: true},
 		}); err != nil {
 			t.Fatalf("scheduling job: %v", err)
@@ -141,6 +145,7 @@ func TestMarkJobFailedIncrementsAttempts(t *testing.T) {
 
 	event := seedEventForJobs(ctx, t, q, 32)
 	if err := q.ScheduleJob(ctx, ScheduleJobParams{
+		ID:      NewID(),
 		EventID: event.ID, JobType: JobEnumCOMPNAG,
 		RunAt: pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true},
 	}); err != nil {
@@ -174,6 +179,7 @@ func TestMarkJobSentTransitionsOutOfPending(t *testing.T) {
 
 	event := seedEventForJobs(ctx, t, q, 33)
 	if err := q.ScheduleJob(ctx, ScheduleJobParams{
+		ID:      NewID(),
 		EventID: event.ID, JobType: JobEnumREMINDER1H,
 		RunAt: pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true},
 	}); err != nil {
@@ -204,10 +210,10 @@ func TestCancelJobsForEventTouchesOnlyPending(t *testing.T) {
 	event := seedEventForJobs(ctx, t, q, 34)
 	future := pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true}
 
-	if err := q.ScheduleJob(ctx, ScheduleJobParams{EventID: event.ID, JobType: JobEnumREMINDER24H, RunAt: future}); err != nil {
+	if err := q.ScheduleJob(ctx, ScheduleJobParams{ID: NewID(), EventID: event.ID, JobType: JobEnumREMINDER24H, RunAt: future}); err != nil {
 		t.Fatalf("scheduling pending job: %v", err)
 	}
-	if err := q.ScheduleJob(ctx, ScheduleJobParams{EventID: event.ID, JobType: JobEnumREMINDER1H, RunAt: future}); err != nil {
+	if err := q.ScheduleJob(ctx, ScheduleJobParams{ID: NewID(), EventID: event.ID, JobType: JobEnumREMINDER1H, RunAt: future}); err != nil {
 		t.Fatalf("scheduling second job: %v", err)
 	}
 

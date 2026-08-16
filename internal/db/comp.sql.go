@@ -77,11 +77,12 @@ func (q *Queries) GetComp(ctx context.Context, arg GetCompParams) (Comp, error) 
 }
 
 const insertCompSlot = `-- name: InsertCompSlot :exec
-INSERT INTO comp_slots (event_id, comp_name, character_id, role, slot_index, is_bench, reason)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO comp_slots (id, event_id, comp_name, character_id, role, slot_index, is_bench, reason)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type InsertCompSlotParams struct {
+	ID          uuid.UUID
 	EventID     uuid.UUID
 	CompName    string
 	CharacterID uuid.UUID
@@ -93,6 +94,7 @@ type InsertCompSlotParams struct {
 
 func (q *Queries) InsertCompSlot(ctx context.Context, arg InsertCompSlotParams) error {
 	_, err := q.db.Exec(ctx, insertCompSlot,
+		arg.ID,
 		arg.EventID,
 		arg.CompName,
 		arg.CharacterID,
@@ -286,13 +288,14 @@ func (q *Queries) SetSignupAssignedRole(ctx context.Context, arg SetSignupAssign
 }
 
 const upsertComp = `-- name: UpsertComp :one
-INSERT INTO comps (event_id, name, mode)
-VALUES ($1, $2, $3)
+INSERT INTO comps (id, event_id, name, mode)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT (event_id, name) DO UPDATE SET name = excluded.name
 RETURNING id, event_id, name, mode
 `
 
 type UpsertCompParams struct {
+	ID      uuid.UUID
 	EventID uuid.UUID
 	Name    string
 	Mode    CompMode
@@ -302,7 +305,12 @@ type UpsertCompParams struct {
 // existing comp between AUTO and MANUAL is SetCompMode's job, so a stray create
 // cannot quietly hand a raid lead's hand-built comp back to the assigner.
 func (q *Queries) UpsertComp(ctx context.Context, arg UpsertCompParams) (Comp, error) {
-	row := q.db.QueryRow(ctx, upsertComp, arg.EventID, arg.Name, arg.Mode)
+	row := q.db.QueryRow(ctx, upsertComp,
+		arg.ID,
+		arg.EventID,
+		arg.Name,
+		arg.Mode,
+	)
 	var i Comp
 	err := row.Scan(
 		&i.ID,

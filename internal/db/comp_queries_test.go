@@ -14,17 +14,19 @@ import (
 func seedEventForComp(ctx context.Context, t *testing.T, q *Queries, discordID int64) (Event, Character) {
 	t.Helper()
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: discordID, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: discordID, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Danthrax", Realm: "Area-52", Region: "us", IsMain: true,
 	})
 	if err != nil {
 		t.Fatalf("creating character: %v", err)
 	}
 	event, err := q.CreateEvent(ctx, CreateEventParams{
+		ID:             NewID(),
 		DiscordGuildID: 100,
 		Type:           EventTypeRAID,
 		Title:          "Prog Night",
@@ -36,6 +38,7 @@ func seedEventForComp(ctx context.Context, t *testing.T, q *Queries, discordID i
 		t.Fatalf("creating event: %v", err)
 	}
 	if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
+		ID:      NewID(),
 		EventID: event.ID, CharacterID: character.ID, Status: SignupStatusCONFIRMED,
 	}); err != nil {
 		t.Fatalf("signing up character: %v", err)
@@ -45,6 +48,7 @@ func seedEventForComp(ctx context.Context, t *testing.T, q *Queries, discordID i
 	// have to exist first.
 	for _, name := range []string{"prog", "farm"} {
 		if _, err := q.UpsertComp(ctx, UpsertCompParams{
+			ID:      NewID(),
 			EventID: event.ID, Name: name, Mode: CompModeAUTO,
 		}); err != nil {
 			t.Fatalf("creating comp %q: %v", name, err)
@@ -60,6 +64,7 @@ func TestCreateEventPersistsDifficulty(t *testing.T) {
 
 	mythic := RaidDifficultyMYTHIC
 	event, err := q.CreateEvent(ctx, CreateEventParams{
+		ID:             NewID(),
 		DiscordGuildID: 100,
 		Type:           EventTypeRAID,
 		Title:          "Mythic Prog",
@@ -127,6 +132,7 @@ func TestUpsertCompKeepsTheModeOfAnExistingComp(t *testing.T) {
 	event, _ := seedEventForComp(ctx, t, q, 22)
 
 	if _, err := q.UpsertComp(ctx, UpsertCompParams{
+		ID:      NewID(),
 		EventID: event.ID, Name: "hand", Mode: CompModeMANUAL,
 	}); err != nil {
 		t.Fatalf("creating manual comp: %v", err)
@@ -135,6 +141,7 @@ func TestUpsertCompKeepsTheModeOfAnExistingComp(t *testing.T) {
 	// The assigner's write path upserts with AUTO. It must not convert a raid lead's
 	// comp back to assigner-owned as a side effect.
 	if _, err := q.UpsertComp(ctx, UpsertCompParams{
+		ID:      NewID(),
 		EventID: event.ID, Name: "hand", Mode: CompModeAUTO,
 	}); err != nil {
 		t.Fatalf("re-upserting comp: %v", err)
@@ -156,6 +163,7 @@ func TestCompSlotRequiresItsComp(t *testing.T) {
 	event, character := seedEventForComp(ctx, t, q, 23)
 
 	err := q.InsertCompSlot(ctx, InsertCompSlotParams{
+		ID:      NewID(),
 		EventID: event.ID, CompName: "ghost", CharacterID: character.ID,
 		Role: RoleEnumTANK, SlotIndex: 0, IsBench: false, Reason: "MANUAL: placed by a raid lead",
 	})
@@ -171,11 +179,13 @@ func TestDeleteCompCascadesToItsSlots(t *testing.T) {
 	event, character := seedEventForComp(ctx, t, q, 24)
 
 	if _, err := q.UpsertComp(ctx, UpsertCompParams{
+		ID:      NewID(),
 		EventID: event.ID, Name: "hand", Mode: CompModeMANUAL,
 	}); err != nil {
 		t.Fatalf("creating comp: %v", err)
 	}
 	if err := q.InsertCompSlot(ctx, InsertCompSlotParams{
+		ID:      NewID(),
 		EventID: event.ID, CompName: "hand", CharacterID: character.ID,
 		Role: RoleEnumTANK, SlotIndex: 0, IsBench: false, Reason: "MANUAL: placed by a raid lead",
 	}); err != nil {
@@ -202,6 +212,7 @@ func TestCompSlotRoundTripsWithReason(t *testing.T) {
 	event, character := seedEventForComp(ctx, t, q, 20)
 
 	if err := q.InsertCompSlot(ctx, InsertCompSlotParams{
+		ID:      NewID(),
 		EventID: event.ID, CompName: "prog", CharacterID: character.ID,
 		Role: RoleEnumTANK, SlotIndex: 0, IsBench: false,
 		Reason: "TANK: priority 1, main, first signup",
@@ -232,6 +243,7 @@ func TestRelockingReplacesRatherThanColliding(t *testing.T) {
 
 	insert := func(role RoleEnum, reason string) error {
 		return q.InsertCompSlot(ctx, InsertCompSlotParams{
+			ID:      NewID(),
 			EventID: event.ID, CompName: "prog", CharacterID: character.ID,
 			Role: role, SlotIndex: 0, IsBench: false, Reason: reason,
 		})
@@ -267,12 +279,14 @@ func TestTwoCompNamesCoexistOnOneEvent(t *testing.T) {
 	event, character := seedEventForComp(ctx, t, q, 22)
 
 	if err := q.InsertCompSlot(ctx, InsertCompSlotParams{
+		ID:      NewID(),
 		EventID: event.ID, CompName: "prog", CharacterID: character.ID,
 		Role: RoleEnumTANK, SlotIndex: 0, IsBench: false, Reason: "prog comp",
 	}); err != nil {
 		t.Fatalf("inserting prog slot: %v", err)
 	}
 	if err := q.InsertCompSlot(ctx, InsertCompSlotParams{
+		ID:      NewID(),
 		EventID: event.ID, CompName: "farm", CharacterID: character.ID,
 		Role: RoleEnumHEALER, SlotIndex: 0, IsBench: false, Reason: "farm comp",
 	}); err != nil {
@@ -303,6 +317,7 @@ func TestLockingSetsAssignedRoleAndLeavesStatusAlone(t *testing.T) {
 	event, character := seedEventForComp(ctx, t, q, 23)
 
 	if err := q.InsertCompSlot(ctx, InsertCompSlotParams{
+		ID:      NewID(),
 		EventID: event.ID, CompName: "prog", CharacterID: character.ID,
 		Role: RoleEnumTANK, SlotIndex: 0, IsBench: false, Reason: "TANK: priority 1, main, first signup",
 	}); err != nil {

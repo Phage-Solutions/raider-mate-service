@@ -46,9 +46,8 @@ func (s *Store) Transact(ctx context.Context, fn func(ctx context.Context, tx re
 	return nil
 }
 
-// CreateEvent inserts the event and its initial job schedule in one transaction: the
-// event's UUIDv7 is only known once the INSERT returns, so the jobs referencing it
-// cannot be a separate, riskier round trip.
+// CreateEvent inserts the event and its initial job schedule in one transaction, so
+// an event cannot end up posted with no reminders behind it.
 func (s *Store) CreateEvent(ctx context.Context, in CreateEventInput) (Event, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -59,6 +58,7 @@ func (s *Store) CreateEvent(ctx context.Context, in CreateEventInput) (Event, er
 	q := s.queries.WithTx(tx)
 
 	row, err := q.CreateEvent(ctx, db.CreateEventParams{
+		ID:             db.NewID(),
 		DiscordGuildID: in.DiscordGuildID,
 		Type:           in.Type,
 		Title:          in.Title,
@@ -157,6 +157,7 @@ func (s *Store) DeleteEvent(ctx context.Context, id uuid.UUID) error {
 func scheduleJobs(ctx context.Context, q *db.Queries, eventID uuid.UUID, startsAt, deadline time.Time) error {
 	for _, job := range jobsFor(startsAt, deadline, time.Now()) {
 		if err := q.ScheduleJob(ctx, db.ScheduleJobParams{
+			ID:      db.NewID(),
 			EventID: eventID, JobType: job.Kind, RunAt: pgtype.Timestamptz{Time: job.RunAt, Valid: true},
 		}); err != nil {
 			return fmt.Errorf("scheduling %s: %w", job.Kind, err)
@@ -182,6 +183,7 @@ func eventFromRow(row db.Event) Event {
 
 func (s *Store) UpsertSignup(ctx context.Context, in SignupWrite) (Signup, error) {
 	row, err := s.queries.UpsertSignup(ctx, db.UpsertSignupParams{
+		ID:      db.NewID(),
 		EventID: in.EventID, CharacterID: in.CharacterID, Status: in.Status, Note: in.Note,
 		LateUntil: timestamptzFromPtr(in.LateUntil),
 	})
@@ -226,6 +228,7 @@ func signupFromRow(row db.Signup) Signup {
 
 func (s *Store) UpsertLateRequest(ctx context.Context, in LateRequestWrite) (LateRequest, error) {
 	row, err := s.queries.UpsertLateRequest(ctx, db.UpsertLateRequestParams{
+		ID:      db.NewID(),
 		EventID: in.EventID, CharacterID: in.CharacterID, Status: in.Status, Note: in.Note,
 		LateUntil: timestamptzFromPtr(in.LateUntil),
 	})
@@ -403,7 +406,8 @@ func (s *Store) MarkNotificationDelivered(ctx context.Context, id uuid.UUID, dis
 }
 
 func (s *Store) InsertNotification(ctx context.Context, n Notification) error {
-	return s.queries.InsertNotification(ctx, db.InsertNotificationParams{
+	_, err := s.queries.InsertNotification(ctx, db.InsertNotificationParams{
+		ID:             db.NewID(),
 		DiscordGuildID: n.DiscordGuildID,
 		EventID:        n.EventID,
 		Kind:           n.Kind,
@@ -413,6 +417,7 @@ func (s *Store) InsertNotification(ctx context.Context, n Notification) error {
 		ChannelID:      n.ChannelID,
 		Payload:        n.Payload,
 	})
+	return err
 }
 
 func (s *Store) ClaimDueJobs(ctx context.Context, limit int32) ([]db.ScheduledJob, error) {

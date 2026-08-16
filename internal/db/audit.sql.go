@@ -36,12 +36,13 @@ func (q *Queries) GetLatestCharacterSnapshot(ctx context.Context, characterID uu
 }
 
 const insertCharacterSnapshot = `-- name: InsertCharacterSnapshot :one
-INSERT INTO character_snapshots (character_id, ilvl, mplus_score, gear)
-VALUES ($1, $2, $3, $4)
+INSERT INTO character_snapshots (id, character_id, ilvl, mplus_score, gear)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING id, character_id, captured_at, ilvl, mplus_score, gear
 `
 
 type InsertCharacterSnapshotParams struct {
+	ID          uuid.UUID
 	CharacterID uuid.UUID
 	Ilvl        pgtype.Numeric
 	MplusScore  pgtype.Numeric
@@ -50,6 +51,7 @@ type InsertCharacterSnapshotParams struct {
 
 func (q *Queries) InsertCharacterSnapshot(ctx context.Context, arg InsertCharacterSnapshotParams) (CharacterSnapshot, error) {
 	row := q.db.QueryRow(ctx, insertCharacterSnapshot,
+		arg.ID,
 		arg.CharacterID,
 		arg.Ilvl,
 		arg.MplusScore,

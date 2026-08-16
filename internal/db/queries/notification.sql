@@ -1,27 +1,32 @@
--- name: InsertNotification :exec
-INSERT INTO notifications (discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, channel_id, payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+-- name: InsertNotification :execrows
+-- The row count tells a suppressed insert from a real one, which is the only way a
+-- caller can see the coalescing below happen.
+--
+-- ON CONFLICT DO NOTHING serves the roster redraws, which lean on
+-- notifications_roster_updated_pending: the second character to change on the same
+-- raid finds a redraw already queued and adds nothing. It is inert for every other
+-- kind, since the partial index does not cover them and the id comes from db.NewID.
+INSERT INTO notifications (id, discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, channel_id, payload)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT DO NOTHING;
 
--- name: InsertRosterUpdatedNotifications :execrows
--- Queues a redraw of every posted, upcoming event this character is signed up to.
--- Written as one INSERT ... SELECT rather than a read followed by inserts so the whole
--- fan-out shares the sync's transaction: no redraw is queued for a snapshot that was
--- rolled back, and none is lost for one that was not.
+-- name: ListEventsNeedingRosterRedraw :many
+-- The posted, upcoming events this character is signed up to, one redraw apiece. The
+-- caller inserts the notifications on the same transaction as the snapshot that
+-- caused them, so no redraw is queued for a sync that was rolled back and none is
+-- lost for one that was not. Two statements rather than the INSERT ... SELECT this
+-- used to be, because the ids are generated in Go and the row count is not known
+-- until this query has run.
 --
 -- Past events are skipped because nobody re-reads a raid that already happened, and
 -- events with no message_id were never posted, so there is nothing to edit.
---
--- ON CONFLICT DO NOTHING leans on notifications_roster_updated_pending: the second
--- character to change on the same raid finds a redraw already queued and adds nothing.
-INSERT INTO notifications (discord_guild_id, event_id, kind, target_kind, channel_id, payload)
-SELECT e.discord_guild_id, e.id, 'ROSTER_UPDATED', 'MESSAGE', e.channel_id, '{}'::jsonb
+SELECT e.id, e.discord_guild_id, e.channel_id
 FROM events e
 JOIN signups s ON s.event_id = e.id
 WHERE s.character_id = sqlc.arg(character_id)
   AND e.starts_at > now()
   AND e.message_id IS NOT NULL
-  AND e.channel_id IS NOT NULL
-ON CONFLICT DO NOTHING;
+  AND e.channel_id IS NOT NULL;
 
 -- name: ClaimNotifications :many
 -- Claiming, not just reading. The ack arrives in a later HTTP request, so no

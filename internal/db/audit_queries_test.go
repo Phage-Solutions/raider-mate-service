@@ -14,11 +14,12 @@ func TestGetLatestCharacterSnapshotReturnsNewest(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 10, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 10, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Danthrax", Realm: "Area-52", Region: "us", IsMain: true,
 	})
 	if err != nil {
@@ -34,6 +35,7 @@ func TestGetLatestCharacterSnapshotReturnsNewest(t *testing.T) {
 	}
 
 	if _, err := q.InsertCharacterSnapshot(ctx, InsertCharacterSnapshotParams{
+		ID:          NewID(),
 		CharacterID: character.ID, Ilvl: older, MplusScore: older, Gear: []byte(`[]`),
 	}); err != nil {
 		t.Fatalf("inserting older snapshot: %v", err)
@@ -41,6 +43,7 @@ func TestGetLatestCharacterSnapshotReturnsNewest(t *testing.T) {
 	// captured_at is transaction start time, so both snapshots tie here; the query
 	// breaks ties on id (UUIDv7, insertion-ordered).
 	want, err := q.InsertCharacterSnapshot(ctx, InsertCharacterSnapshotParams{
+		ID:          NewID(),
 		CharacterID: character.ID, Ilvl: newer, MplusScore: newer, Gear: []byte(`[{"slot":"head"}]`),
 	})
 	if err != nil {
@@ -60,24 +63,27 @@ func TestListCharactersDueForSyncOrdersOldestFirstNullsFirst(t *testing.T) {
 	ctx := context.Background()
 	q, tx := newTxQueries(ctx, t)
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 11, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 11, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 
 	neverSynced, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "NeverSynced", Realm: "Area-52", Region: "us",
 	})
 	if err != nil {
 		t.Fatalf("creating never-synced character: %v", err)
 	}
 	syncedRecently, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "SyncedRecently", Realm: "Area-52", Region: "us",
 	})
 	if err != nil {
 		t.Fatalf("creating recently-synced character: %v", err)
 	}
 	syncedLongAgo, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "SyncedLongAgo", Realm: "Area-52", Region: "us",
 	})
 	if err != nil {
@@ -120,11 +126,12 @@ func TestMarkCharacterSyncAttemptedDropsCharacterFromDueSet(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 12, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 12, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 	failing, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Failing", Realm: "Area-52", Region: "us",
 	})
 	if err != nil {
@@ -156,11 +163,12 @@ func TestUpdateCharacterFromSyncKeepsClassWhenNull(t *testing.T) {
 	ctx := context.Background()
 	q, _ := newTxQueries(ctx, t)
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: 13, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: 13, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Danthrax", Realm: "Area-52", Region: "us",
 	})
 	if err != nil {

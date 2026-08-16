@@ -47,6 +47,7 @@ func seedCommittedEvent(ctx context.Context, t *testing.T, q *Queries) Event {
 
 	messageID, channelID := int64(9001), int64(9002)
 	event, err := q.CreateEvent(ctx, CreateEventParams{
+		ID:             NewID(),
 		DiscordGuildID: notifyGuild,
 		Type:           EventTypeRAID,
 		Title:          "Signal Night",
@@ -67,11 +68,12 @@ func seedCommittedEvent(ctx context.Context, t *testing.T, q *Queries) Event {
 func seedCommittedCharacter(ctx context.Context, t *testing.T, q *Queries, discordID int64) Character {
 	t.Helper()
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: discordID, DiscordGuildID: notifyGuild})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: discordID, DiscordGuildID: notifyGuild})
 	if err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
 	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: "Signaller", Realm: "silvermoon", Region: "eu", IsMain: true,
 	})
 	if err != nil {
@@ -91,7 +93,8 @@ func TestInsertingANotificationRaisesTheQueuedSignal(t *testing.T) {
 	event := seedCommittedEvent(ctx, t, q)
 
 	discordID := int64(9100)
-	if err := q.InsertNotification(ctx, InsertNotificationParams{
+	if _, err := q.InsertNotification(ctx, InsertNotificationParams{
+		ID:             NewID(),
 		DiscordGuildID: notifyGuild,
 		EventID:        event.ID,
 		Kind:           NotificationKindREMINDER24H,
@@ -107,34 +110,48 @@ func TestInsertingANotificationRaisesTheQueuedSignal(t *testing.T) {
 	}
 }
 
-func TestOneStatementRaisesOneSignalHoweverManyRows(t *testing.T) {
+func TestOneTransactionRaisesOneSignalHoweverManyInserts(t *testing.T) {
 	ctx := context.Background()
 	q := New(pool)
 	waitForSignal := listenForQueued(ctx, t)
-	event := seedCommittedEvent(ctx, t, q)
-	character := seedCommittedCharacter(ctx, t, q, 9101)
+	first := seedCommittedEvent(ctx, t, q)
+	second := seedCommittedEvent(ctx, t, q)
 
-	if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
-		EventID: event.ID, CharacterID: character.ID, Status: SignupStatusCONFIRMED,
-	}); err != nil {
-		t.Fatalf("signing up: %v", err)
-	}
-
-	// The fan-out insert writes one row per event this character is signed up to. The
-	// bot's answer to all of them is a single claim, which is why the trigger fires per
-	// statement rather than per row.
-	rows, err := q.InsertRosterUpdatedNotifications(ctx, character.ID)
+	// A sync fans a redraw out over every raid the character is on, one insert apiece.
+	// The bot's answer to all of them is a single claim, so the empty payload matters:
+	// Postgres collapses notifications that match on channel and payload within a
+	// transaction, and the trigger's per-statement firing cannot do it alone once the
+	// fan-out is a loop.
+	tx, err := pool.Begin(ctx)
 	if err != nil {
-		t.Fatalf("queueing redraws: %v", err)
+		t.Fatalf("beginning tx: %v", err)
 	}
-	if rows != 1 {
-		t.Fatalf("queued %d redraws, want 1", rows)
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	qtx := q.WithTx(tx)
+	for _, event := range []Event{first, second} {
+		channelID := *event.ChannelID
+		if _, err := qtx.InsertNotification(ctx, InsertNotificationParams{
+			ID:             NewID(),
+			DiscordGuildID: notifyGuild,
+			EventID:        event.ID,
+			Kind:           NotificationKindROSTERUPDATED,
+			TargetKind:     NotificationTargetMESSAGE,
+			ChannelID:      &channelID,
+			Payload:        []byte(`{}`),
+		}); err != nil {
+			t.Fatalf("queueing redraw for event %s: %v", event.ID, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("committing tx: %v", err)
 	}
 
 	if !waitForSignal(5 * time.Second) {
-		t.Fatal("no notification_queued signal after the fan-out insert")
+		t.Fatal("no notification_queued signal after the fan-out")
 	}
 	if waitForSignal(500 * time.Millisecond) {
-		t.Error("a second signal arrived for a single statement")
+		t.Error("a second signal arrived for a single transaction")
 	}
 }

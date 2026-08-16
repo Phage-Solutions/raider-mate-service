@@ -24,12 +24,13 @@ func (q *Queries) CountCompSlotsForEvent(ctx context.Context, eventID uuid.UUID)
 }
 
 const createEvent = `-- name: CreateEvent :one
-INSERT INTO events (discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO events (id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty
 `
 
 type CreateEventParams struct {
+	ID             uuid.UUID
 	DiscordGuildID int64
 	Type           EventType
 	Title          string
@@ -46,6 +47,7 @@ type CreateEventParams struct {
 // raid from a flex one without it.
 func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (Event, error) {
 	row := q.db.QueryRow(ctx, createEvent,
+		arg.ID,
 		arg.DiscordGuildID,
 		arg.Type,
 		arg.Title,
@@ -418,8 +420,8 @@ func (q *Queries) UpdateEvent(ctx context.Context, arg UpdateEventParams) (Event
 }
 
 const upsertLateRequest = `-- name: UpsertLateRequest :one
-INSERT INTO late_signup_requests (event_id, character_id, status, note, late_until)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO late_signup_requests (id, event_id, character_id, status, note, late_until)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (event_id, character_id) DO UPDATE SET
     status = excluded.status,
     note = excluded.note,
@@ -430,6 +432,7 @@ RETURNING id, event_id, character_id, status, note, state, created_at, decided_a
 `
 
 type UpsertLateRequestParams struct {
+	ID          uuid.UUID
 	EventID     uuid.UUID
 	CharacterID uuid.UUID
 	Status      SignupStatus
@@ -441,6 +444,7 @@ type UpsertLateRequestParams struct {
 // unique constraint makes this an upsert rather than a pile of rows.
 func (q *Queries) UpsertLateRequest(ctx context.Context, arg UpsertLateRequestParams) (LateSignupRequest, error) {
 	row := q.db.QueryRow(ctx, upsertLateRequest,
+		arg.ID,
 		arg.EventID,
 		arg.CharacterID,
 		arg.Status,
@@ -463,8 +467,8 @@ func (q *Queries) UpsertLateRequest(ctx context.Context, arg UpsertLateRequestPa
 }
 
 const upsertSignup = `-- name: UpsertSignup :one
-INSERT INTO signups (event_id, character_id, status, note, late_until)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO signups (id, event_id, character_id, status, note, late_until)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (event_id, character_id) DO UPDATE SET
     status = excluded.status,
     note = excluded.note,
@@ -477,6 +481,7 @@ RETURNING id, event_id, character_id, status, assigned_role, late_until, note, c
 `
 
 type UpsertSignupParams struct {
+	ID          uuid.UUID
 	EventID     uuid.UUID
 	CharacterID uuid.UUID
 	Status      SignupStatus
@@ -490,6 +495,7 @@ type UpsertSignupParams struct {
 // dropped. Editing only the note leaves an existing assignment alone.
 func (q *Queries) UpsertSignup(ctx context.Context, arg UpsertSignupParams) (Signup, error) {
 	row := q.db.QueryRow(ctx, upsertSignup,
+		arg.ID,
 		arg.EventID,
 		arg.CharacterID,
 		arg.Status,

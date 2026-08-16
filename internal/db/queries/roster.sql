@@ -1,6 +1,6 @@
 -- name: UpsertUser :one
-INSERT INTO users (discord_id, discord_guild_id)
-VALUES ($1, $2)
+INSERT INTO users (id, discord_id, discord_guild_id)
+VALUES ($1, $2, $3)
 ON CONFLICT (discord_id, discord_guild_id) DO UPDATE SET discord_id = excluded.discord_id
 RETURNING *;
 
@@ -9,8 +9,8 @@ SELECT * FROM users
 WHERE discord_id = $1 AND discord_guild_id = $2;
 
 -- name: CreateCharacter :one
-INSERT INTO characters (user_id, name, realm, region, is_main)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO characters (id, user_id, name, realm, region, is_main)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetCharacterInGuild :one

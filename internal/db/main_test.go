@@ -29,7 +29,7 @@ func runTests(m *testing.M) int {
 	ctx := context.Background()
 
 	pgContainer, err := postgres.Run(ctx,
-		"postgres:18-alpine",
+		"postgres:17-alpine",
 		postgres.WithDatabase("raidermate_test"),
 		postgres.WithUsername("test"),
 		postgres.WithPassword("test"),

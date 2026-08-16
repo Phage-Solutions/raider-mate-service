@@ -1,6 +1,6 @@
 -- name: ScheduleJob :exec
-INSERT INTO scheduled_jobs (event_id, job_type, run_at)
-VALUES ($1, $2, $3);
+INSERT INTO scheduled_jobs (id, event_id, job_type, run_at)
+VALUES ($1, $2, $3, $4);
 
 -- name: ClaimDueJobs :many
 SELECT * FROM scheduled_jobs

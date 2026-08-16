@@ -73,12 +73,14 @@ func (q *Queries) ClaimNotifications(ctx context.Context, arg ClaimNotifications
 	return items, nil
 }
 
-const insertNotification = `-- name: InsertNotification :exec
-INSERT INTO notifications (discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, channel_id, payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+const insertNotification = `-- name: InsertNotification :execrows
+INSERT INTO notifications (id, discord_guild_id, event_id, kind, target_kind, discord_id, role_ids, channel_id, payload)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT DO NOTHING
 `
 
 type InsertNotificationParams struct {
+	ID             uuid.UUID
 	DiscordGuildID int64
 	EventID        uuid.UUID
 	Kind           NotificationKind
@@ -89,8 +91,16 @@ type InsertNotificationParams struct {
 	Payload        []byte
 }
 
-func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotificationParams) error {
-	_, err := q.db.Exec(ctx, insertNotification,
+// The row count tells a suppressed insert from a real one, which is the only way a
+// caller can see the coalescing below happen.
+//
+// ON CONFLICT DO NOTHING serves the roster redraws, which lean on
+// notifications_roster_updated_pending: the second character to change on the same
+// raid finds a redraw already queued and adds nothing. It is inert for every other
+// kind, since the partial index does not cover them and the id comes from db.NewID.
+func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertNotification,
+		arg.ID,
 		arg.DiscordGuildID,
 		arg.EventID,
 		arg.Kind,
@@ -100,37 +110,55 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 		arg.ChannelID,
 		arg.Payload,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const insertRosterUpdatedNotifications = `-- name: InsertRosterUpdatedNotifications :execrows
-INSERT INTO notifications (discord_guild_id, event_id, kind, target_kind, channel_id, payload)
-SELECT e.discord_guild_id, e.id, 'ROSTER_UPDATED', 'MESSAGE', e.channel_id, '{}'::jsonb
+const listEventsNeedingRosterRedraw = `-- name: ListEventsNeedingRosterRedraw :many
+SELECT e.id, e.discord_guild_id, e.channel_id
 FROM events e
 JOIN signups s ON s.event_id = e.id
 WHERE s.character_id = $1
   AND e.starts_at > now()
   AND e.message_id IS NOT NULL
   AND e.channel_id IS NOT NULL
-ON CONFLICT DO NOTHING
 `
 
-// Queues a redraw of every posted, upcoming event this character is signed up to.
-// Written as one INSERT ... SELECT rather than a read followed by inserts so the whole
-// fan-out shares the sync's transaction: no redraw is queued for a snapshot that was
-// rolled back, and none is lost for one that was not.
+type ListEventsNeedingRosterRedrawRow struct {
+	ID             uuid.UUID
+	DiscordGuildID int64
+	ChannelID      *int64
+}
+
+// The posted, upcoming events this character is signed up to, one redraw apiece. The
+// caller inserts the notifications on the same transaction as the snapshot that
+// caused them, so no redraw is queued for a sync that was rolled back and none is
+// lost for one that was not. Two statements rather than the INSERT ... SELECT this
+// used to be, because the ids are generated in Go and the row count is not known
+// until this query has run.
 //
 // Past events are skipped because nobody re-reads a raid that already happened, and
 // events with no message_id were never posted, so there is nothing to edit.
-//
-// ON CONFLICT DO NOTHING leans on notifications_roster_updated_pending: the second
-// character to change on the same raid finds a redraw already queued and adds nothing.
-func (q *Queries) InsertRosterUpdatedNotifications(ctx context.Context, characterID uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, insertRosterUpdatedNotifications, characterID)
+func (q *Queries) ListEventsNeedingRosterRedraw(ctx context.Context, characterID uuid.UUID) ([]ListEventsNeedingRosterRedrawRow, error) {
+	rows, err := q.db.Query(ctx, listEventsNeedingRosterRedraw, characterID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected(), nil
+	defer rows.Close()
+	var items []ListEventsNeedingRosterRedrawRow
+	for rows.Next() {
+		var i ListEventsNeedingRosterRedrawRow
+		if err := rows.Scan(&i.ID, &i.DiscordGuildID, &i.ChannelID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markNotificationDelivered = `-- name: MarkNotificationDelivered :execrows

@@ -19,7 +19,8 @@ func TestNotificationRoundTripsAndClearsFromUndelivered(t *testing.T) {
 	event := seedEventForJobs(ctx, t, q, 40)
 	discordID := int64(9001)
 
-	if err := q.InsertNotification(ctx, InsertNotificationParams{
+	if _, err := q.InsertNotification(ctx, InsertNotificationParams{
+		ID:             NewID(),
 		DiscordGuildID: 100,
 		EventID:        event.ID,
 		Kind:           NotificationKindREMINDER24H,
@@ -86,7 +87,8 @@ func TestClaimNotificationsHandsARowToOnePollerOnly(t *testing.T) {
 
 	event := seedEventForJobs(ctx, t, q, 45)
 	discordID := int64(9002)
-	if err := q.InsertNotification(ctx, InsertNotificationParams{
+	if _, err := q.InsertNotification(ctx, InsertNotificationParams{
+		ID:             NewID(),
 		DiscordGuildID: 100, EventID: event.ID, Kind: NotificationKindREMINDER24H,
 		TargetKind: NotificationTargetUSER, DiscordID: &discordID, Payload: []byte(`{}`),
 	}); err != nil {
@@ -118,7 +120,8 @@ func TestClaimNotificationsRedeliversAfterTheLeaseExpires(t *testing.T) {
 
 	event := seedEventForJobs(ctx, t, q, 46)
 	discordID := int64(9003)
-	if err := q.InsertNotification(ctx, InsertNotificationParams{
+	if _, err := q.InsertNotification(ctx, InsertNotificationParams{
+		ID:             NewID(),
 		DiscordGuildID: 100, EventID: event.ID, Kind: NotificationKindREMINDER1H,
 		TargetKind: NotificationTargetUSER, DiscordID: &discordID, Payload: []byte(`{}`),
 	}); err != nil {
@@ -146,7 +149,8 @@ func TestMarkNotificationDeliveredIgnoresAnotherGuildsRow(t *testing.T) {
 
 	event := seedEventForJobs(ctx, t, q, 47)
 	discordID := int64(9004)
-	if err := q.InsertNotification(ctx, InsertNotificationParams{
+	if _, err := q.InsertNotification(ctx, InsertNotificationParams{
+		ID:             NewID(),
 		DiscordGuildID: 100, EventID: event.ID, Kind: NotificationKindREMINDER24H,
 		TargetKind: NotificationTargetUSER, DiscordID: &discordID, Payload: []byte(`{}`),
 	}); err != nil {
@@ -176,6 +180,7 @@ func TestClaimNotificationsFiltersByGuild(t *testing.T) {
 
 	eventA := seedEventForJobs(ctx, t, q, 41)
 	eventB, err := q.CreateEvent(ctx, CreateEventParams{
+		ID:             NewID(),
 		DiscordGuildID: 200,
 		Type:           EventTypeRAID,
 		Title:          "Other Guild Night",
@@ -188,13 +193,15 @@ func TestClaimNotificationsFiltersByGuild(t *testing.T) {
 	}
 
 	channelID := int64(555)
-	if err := q.InsertNotification(ctx, InsertNotificationParams{
+	if _, err := q.InsertNotification(ctx, InsertNotificationParams{
+		ID:             NewID(),
 		DiscordGuildID: 100, EventID: eventA.ID, Kind: NotificationKindCOMPNAG,
 		TargetKind: NotificationTargetROLE, ChannelID: &channelID, Payload: []byte(`{}`),
 	}); err != nil {
 		t.Fatalf("inserting notification for guild 100: %v", err)
 	}
-	if err := q.InsertNotification(ctx, InsertNotificationParams{
+	if _, err := q.InsertNotification(ctx, InsertNotificationParams{
+		ID:             NewID(),
 		DiscordGuildID: 200, EventID: eventB.ID, Kind: NotificationKindCOMPNAG,
 		TargetKind: NotificationTargetROLE, ChannelID: &channelID, Payload: []byte(`{}`),
 	}); err != nil {
@@ -217,7 +224,8 @@ func TestNotificationCheckConstraintRejectsUserRowWithNoDiscordID(t *testing.T) 
 
 	event := seedEventForJobs(ctx, t, q, 42)
 
-	err := q.InsertNotification(ctx, InsertNotificationParams{
+	_, err := q.InsertNotification(ctx, InsertNotificationParams{
+		ID:             NewID(),
 		DiscordGuildID: 100, EventID: event.ID, Kind: NotificationKindREMINDER1H,
 		TargetKind: NotificationTargetUSER, Payload: []byte(`{}`),
 	})

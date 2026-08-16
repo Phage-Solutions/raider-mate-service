@@ -160,6 +160,7 @@ func (s *Store) ReplaceComp(ctx context.Context, arg ReplaceComp) error {
 	// comp_slots carries an FK to comps, so the comp has to exist before its slots.
 	// UpsertComp leaves an existing comp's mode alone.
 	if _, err := q.UpsertComp(ctx, db.UpsertCompParams{
+		ID:      db.NewID(),
 		EventID: arg.EventID, Name: arg.CompName, Mode: arg.Mode,
 	}); err != nil {
 		return fmt.Errorf("upserting comp: %w", err)
@@ -173,6 +174,7 @@ func (s *Store) ReplaceComp(ctx context.Context, arg ReplaceComp) error {
 
 	for _, a := range arg.Result.Assignments {
 		if err := q.InsertCompSlot(ctx, db.InsertCompSlotParams{
+			ID:          db.NewID(),
 			EventID:     arg.EventID,
 			CompName:    arg.CompName,
 			CharacterID: a.CharacterID,

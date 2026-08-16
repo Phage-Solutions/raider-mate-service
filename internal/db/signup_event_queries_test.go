@@ -14,11 +14,12 @@ import (
 func seedUserAndCharacter(ctx context.Context, t *testing.T, q *Queries, discordID int64, name string) (User, Character) {
 	t.Helper()
 
-	user, err := q.UpsertUser(ctx, UpsertUserParams{DiscordID: discordID, DiscordGuildID: 100})
+	user, err := q.UpsertUser(ctx, UpsertUserParams{ID: NewID(), DiscordID: discordID, DiscordGuildID: 100})
 	if err != nil {
 		t.Fatalf("upserting user: %v", err)
 	}
 	character, err := q.CreateCharacter(ctx, CreateCharacterParams{
+		ID:     NewID(),
 		UserID: user.ID, Name: name, Realm: "Area-52", Region: "us", IsMain: true,
 	})
 	if err != nil {
@@ -77,6 +78,7 @@ func TestDeleteEventCascadesToSignups(t *testing.T) {
 	_, character := seedUserAndCharacter(ctx, t, q, 52, "Danthrax")
 
 	if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
+		ID:      NewID(),
 		EventID: event.ID, CharacterID: character.ID, Status: SignupStatusCONFIRMED,
 	}); err != nil {
 		t.Fatalf("signing up: %v", err)
@@ -108,6 +110,7 @@ func TestDeleteSignupRemovesOnlyThatRow(t *testing.T) {
 
 	for _, c := range []Character{charA, charB} {
 		if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
+			ID:      NewID(),
 			EventID: event.ID, CharacterID: c.ID, Status: SignupStatusCONFIRMED,
 		}); err != nil {
 			t.Fatalf("signing up %s: %v", c.Name, err)
@@ -136,6 +139,7 @@ func TestUpsertSignupLateUntilRoundTripsAndClearsOnStatusChange(t *testing.T) {
 
 	lateUntil := dbTimestamptz(time.Now().Add(20*time.Minute + 195*time.Nanosecond))
 	signup, err := q.UpsertSignup(ctx, UpsertSignupParams{
+		ID:      NewID(),
 		EventID: event.ID, CharacterID: character.ID, Status: SignupStatusLATE, LateUntil: lateUntil,
 	})
 	if err != nil {
@@ -148,6 +152,7 @@ func TestUpsertSignupLateUntilRoundTripsAndClearsOnStatusChange(t *testing.T) {
 	// A status change to CONFIRMED with no late_until clears it, same as the
 	// existing rule for assigned_role.
 	changed, err := q.UpsertSignup(ctx, UpsertSignupParams{
+		ID:      NewID(),
 		EventID: event.ID, CharacterID: character.ID, Status: SignupStatusCONFIRMED,
 	})
 	if err != nil {
@@ -166,6 +171,7 @@ func TestListUndecidedForEventGroupsByUserNotCharacter(t *testing.T) {
 	user, _ := seedUserAndCharacter(ctx, t, q, 59, "Main")
 	for i, altName := range []string{"Alt1", "Alt2", "Alt3"} {
 		if _, err := q.CreateCharacter(ctx, CreateCharacterParams{
+			ID:     NewID(),
 			UserID: user.ID, Name: altName, Realm: "Area-52", Region: "us", IsMain: false,
 		}); err != nil {
 			t.Fatalf("creating alt %d: %v", i, err)
@@ -173,6 +179,7 @@ func TestListUndecidedForEventGroupsByUserNotCharacter(t *testing.T) {
 	}
 	_, otherUserChar := seedUserAndCharacter(ctx, t, q, 60, "Decided")
 	if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
+		ID:      NewID(),
 		EventID: event.ID, CharacterID: otherUserChar.ID, Status: SignupStatusCONFIRMED,
 	}); err != nil {
 		t.Fatalf("signing up the decided character: %v", err)
@@ -195,6 +202,7 @@ func TestListUndecidedForEventSkipsAUserWhoAnsweredOnOneCharacter(t *testing.T) 
 	user, main := seedUserAndCharacter(ctx, t, q, 71, "Main")
 	for i, altName := range []string{"Alt1", "Alt2", "Alt3"} {
 		if _, err := q.CreateCharacter(ctx, CreateCharacterParams{
+			ID:     NewID(),
 			UserID: user.ID, Name: altName, Realm: "Area-52", Region: "us", IsMain: false,
 		}); err != nil {
 			t.Fatalf("creating alt %d: %v", i, err)
@@ -205,6 +213,7 @@ func TestListUndecidedForEventSkipsAUserWhoAnsweredOnOneCharacter(t *testing.T) 
 	// person: a per-character join would still emit the three unsigned alts and nag
 	// them about an event they have already answered.
 	if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
+		ID:      NewID(),
 		EventID: event.ID, CharacterID: main.ID, Status: SignupStatusCONFIRMED,
 	}); err != nil {
 		t.Fatalf("signing up the main: %v", err)
@@ -231,6 +240,7 @@ func TestListConfirmedWithRoleOnlyReturnsAssignedSignups(t *testing.T) {
 
 	for _, c := range []Character{assigned, unassigned} {
 		if _, err := q.UpsertSignup(ctx, UpsertSignupParams{
+			ID:      NewID(),
 			EventID: event.ID, CharacterID: c.ID, Status: SignupStatusCONFIRMED,
 		}); err != nil {
 			t.Fatalf("signing up %s: %v", c.Name, err)
@@ -270,6 +280,7 @@ func TestCountCompSlotsForEventReflectsLockState(t *testing.T) {
 	}
 
 	if err := q.InsertCompSlot(ctx, InsertCompSlotParams{
+		ID:      NewID(),
 		EventID: event.ID, CompName: "prog", CharacterID: character.ID,
 		Role: RoleEnumTANK, SlotIndex: 0, IsBench: false, Reason: "locked",
 	}); err != nil {
@@ -293,6 +304,7 @@ func TestLateSignupRequestReRequestUpsertsRatherThanDuplicating(t *testing.T) {
 	_, character := seedUserAndCharacter(ctx, t, q, 66, "Latecomer")
 
 	first, err := q.UpsertLateRequest(ctx, UpsertLateRequestParams{
+		ID:      NewID(),
 		EventID: event.ID, CharacterID: character.ID, Status: SignupStatusLATE,
 	})
 	if err != nil {
@@ -318,6 +330,7 @@ func TestLateSignupRequestReRequestUpsertsRatherThanDuplicating(t *testing.T) {
 
 	// Filing again for the same event/character upserts: same row, reset to PENDING.
 	second, err := q.UpsertLateRequest(ctx, UpsertLateRequestParams{
+		ID:      NewID(),
 		EventID: event.ID, CharacterID: character.ID, Status: SignupStatusDECLINED,
 	})
 	if err != nil {

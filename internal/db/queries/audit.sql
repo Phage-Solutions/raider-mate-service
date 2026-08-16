@@ -1,6 +1,6 @@
 -- name: InsertCharacterSnapshot :one
-INSERT INTO character_snapshots (character_id, ilvl, mplus_score, gear)
-VALUES ($1, $2, $3, $4)
+INSERT INTO character_snapshots (id, character_id, ilvl, mplus_score, gear)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetLatestCharacterSnapshot :one

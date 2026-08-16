@@ -48,8 +48,16 @@ assumption that raiders play more than one role.
 ### Key decisions
 
 **UUIDv7, not v4.** Same 128 bits, but time-ordered, so B-tree inserts stay at the
-right edge of the index instead of scattering pages. Postgres 18 has native
-`uuidv7()`; below that, generate application-side.
+right edge of the index instead of scattering pages.
+
+**Generated in Go, not by Postgres.** `uuid.NewV7()` behind `db.NewID()`, passed to
+every insert as an ordinary parameter. Native `uuidv7()` arrived in Postgres 18, and a
+`DEFAULT` calling it would put a version floor on the schema: Scaleway Managed
+Database, which the hosted instance runs on, offers 17, and a self-hoster runs
+whatever their distro ships. Generating in the application also means the id exists
+before the insert, which is what lets comp lock write a comp and its slots in one
+transaction. No uuid column has a default, so a forgotten id fails loudly instead of
+silently landing a v4 and scattering the index v7 was chosen to keep tidy.
 
 **Discord snowflakes stay `bigint`.** They're assigned by Discord, not by us. Model as
 `id uuid PK` + `discord_id bigint`.
@@ -129,6 +137,8 @@ justified, because otherwise link logic scatters across every handler.
 ---
 
 ## 3. Data model
+
+Every `uuid PK` below is supplied by the application. No table has a uuid default.
 
 ```sql
 users (

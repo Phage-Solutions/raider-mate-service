@@ -2,8 +2,8 @@
 -- difficulty is NULL for MYTHIC_PLUS events, which have no difficulty of their own.
 -- For a raid it decides the comp size rule, so the assigner cannot tell a Mythic
 -- raid from a flex one without it.
-INSERT INTO events (discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO events (id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;
 
 -- name: SetEventDifficulty :exec
@@ -41,8 +41,8 @@ ORDER BY starts_at ASC;
 -- name: UpsertSignup :one
 -- late_until is a plain write-through field, same as note: internal/signup owns the
 -- rule that it is only meaningful alongside status = LATE and nils it otherwise.
-INSERT INTO signups (event_id, character_id, status, note, late_until)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO signups (id, event_id, character_id, status, note, late_until)
+VALUES ($1, $2, $3, $4, $5, $6)
 -- A status change invalidates whatever the comp lock decided, so the assignment is
 -- dropped. Editing only the note leaves an existing assignment alone.
 ON CONFLICT (event_id, character_id) DO UPDATE SET
@@ -104,8 +104,8 @@ SELECT count(*) FROM comp_slots WHERE event_id = $1;
 -- name: UpsertLateRequest :one
 -- A re-request resets state to PENDING and clears any prior decision, since the
 -- unique constraint makes this an upsert rather than a pile of rows.
-INSERT INTO late_signup_requests (event_id, character_id, status, note, late_until)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO late_signup_requests (id, event_id, character_id, status, note, late_until)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (event_id, character_id) DO UPDATE SET
     status = excluded.status,
     note = excluded.note,

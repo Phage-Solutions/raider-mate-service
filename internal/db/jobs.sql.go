@@ -85,17 +85,23 @@ func (q *Queries) MarkJobSent(ctx context.Context, id uuid.UUID) error {
 }
 
 const scheduleJob = `-- name: ScheduleJob :exec
-INSERT INTO scheduled_jobs (event_id, job_type, run_at)
-VALUES ($1, $2, $3)
+INSERT INTO scheduled_jobs (id, event_id, job_type, run_at)
+VALUES ($1, $2, $3, $4)
 `
 
 type ScheduleJobParams struct {
+	ID      uuid.UUID
 	EventID uuid.UUID
 	JobType JobEnum
 	RunAt   pgtype.Timestamptz
 }
 
 func (q *Queries) ScheduleJob(ctx context.Context, arg ScheduleJobParams) error {
-	_, err := q.db.Exec(ctx, scheduleJob, arg.EventID, arg.JobType, arg.RunAt)
+	_, err := q.db.Exec(ctx, scheduleJob,
+		arg.ID,
+		arg.EventID,
+		arg.JobType,
+		arg.RunAt,
+	)
 	return err
 }

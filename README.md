@@ -11,9 +11,9 @@ Go, Postgres via `pgx`, `sqlc` for queries, `goose` for migrations. No ORM.
 
 ## Running locally
 
-Requires PostgreSQL 18 that can be run with this command:
+Requires PostgreSQL 17 that can be run with this command:
 ```shell
-docker run --name raider-mate-db -p 5432:5432 -d --env "POSTGRES_PASSWORD=raider-mate" --env "POSTGRES_USER=raider-mate" postgres:18 postgres
+docker run --name raider-mate-db -p 5432:5432 -d --env "POSTGRES_PASSWORD=raider-mate" --env "POSTGRES_USER=raider-mate" postgres:17 postgres
 ```
 
 Requires Go 1.26+ and Docker.

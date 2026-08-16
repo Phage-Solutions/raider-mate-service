@@ -13,12 +13,13 @@ import (
 )
 
 const createCharacter = `-- name: CreateCharacter :one
-INSERT INTO characters (user_id, name, realm, region, is_main)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO characters (id, user_id, name, realm, region, is_main)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, user_id, name, realm, class, spec, ilvl, mplus_score, last_synced, is_main, region, sync_attempted_at
 `
 
 type CreateCharacterParams struct {
+	ID     uuid.UUID
 	UserID uuid.UUID
 	Name   string
 	Realm  string
@@ -28,6 +29,7 @@ type CreateCharacterParams struct {
 
 func (q *Queries) CreateCharacter(ctx context.Context, arg CreateCharacterParams) (Character, error) {
 	row := q.db.QueryRow(ctx, createCharacter,
+		arg.ID,
 		arg.UserID,
 		arg.Name,
 		arg.Realm,
@@ -454,19 +456,20 @@ func (q *Queries) UpdateCharacterFromSync(ctx context.Context, arg UpdateCharact
 }
 
 const upsertUser = `-- name: UpsertUser :one
-INSERT INTO users (discord_id, discord_guild_id)
-VALUES ($1, $2)
+INSERT INTO users (id, discord_id, discord_guild_id)
+VALUES ($1, $2, $3)
 ON CONFLICT (discord_id, discord_guild_id) DO UPDATE SET discord_id = excluded.discord_id
 RETURNING id, discord_id, discord_guild_id, created_at
 `
 
 type UpsertUserParams struct {
+	ID             uuid.UUID
 	DiscordID      int64
 	DiscordGuildID int64
 }
 
 func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, upsertUser, arg.DiscordID, arg.DiscordGuildID)
+	row := q.db.QueryRow(ctx, upsertUser, arg.ID, arg.DiscordID, arg.DiscordGuildID)
 	var i User
 	err := row.Scan(
 		&i.ID,
