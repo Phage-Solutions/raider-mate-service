@@ -12,6 +12,8 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-19
+
 ### Changed
 
 - Players may write `LATE` and `ABSENT` until `starts_at`, past `signup_deadline`. Both
