@@ -156,6 +156,42 @@ func TestWritePassesForARaidLeadPastTheDeadline(t *testing.T) {
 	}
 }
 
+// Both statuses report what is happening on the night, so the gate for them is the
+// pull rather than the signup deadline.
+func TestWriteAcceptsLateAndAbsentPastTheDeadline(t *testing.T) {
+	now := time.Now()
+	for _, status := range []db.SignupStatus{db.SignupStatusLATE, db.SignupStatusABSENT} {
+		t.Run(string(status), func(t *testing.T) {
+			store := newFakeSignupStore()
+			store.event = Event{SignupDeadline: now.Add(-time.Hour), StartsAt: now.Add(time.Hour)}
+
+			_, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{Status: status}, false)
+			if err != nil {
+				t.Fatalf("Write %s past deadline: %v", status, err)
+			}
+			if len(store.written) != 1 {
+				t.Fatalf("wrote %d signups, want 1", len(store.written))
+			}
+		})
+	}
+}
+
+func TestWriteRejectsLateOnceTheRaidHasStarted(t *testing.T) {
+	now := time.Now()
+	store := newFakeSignupStore()
+	store.event = Event{SignupDeadline: now.Add(-2 * time.Hour), StartsAt: now.Add(-time.Hour)}
+
+	lateUntil := now.Add(time.Hour)
+	_, err := NewSignups(store, newTestLogger()).Write(context.Background(),
+		SignupWrite{Status: db.SignupStatusLATE, LateUntil: &lateUntil}, false)
+	if !errors.Is(err, ErrSignupsClosed) {
+		t.Fatalf("err = %v, want ErrSignupsClosed", err)
+	}
+	if len(store.written) != 0 {
+		t.Errorf("wrote %d signups, want none", len(store.written))
+	}
+}
+
 // TestWriteStatusAuthority walks every status for both callers. ABSENT is a planned
 // absence the raider declares, so it belongs to them; NO_SHOW is the raid lead's
 // judgement about the night and is the only value they hold alone.

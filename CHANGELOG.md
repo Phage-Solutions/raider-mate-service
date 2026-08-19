@@ -12,6 +12,20 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+### Changed
+
+- Players may write `LATE` and `ABSENT` until `starts_at`, past `signup_deadline`. Both
+  report what is happening on the night, so they are accepted outright rather than
+  filed as a late request. Every other status, and a withdrawal, still closes at the
+  deadline.
+
+### Removed
+
+- `COMP_NAG`. Nothing schedules the job and nothing sends the notification: locking a
+  comp is optional, so an unlocked one is no longer chased two hours out. The enum
+  values stay for now, and jobs an older release scheduled are drained without
+  notifying anyone.
+
 ## [0.3.1] - 2026-08-16
 
 ### Added

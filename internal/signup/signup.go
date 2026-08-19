@@ -114,7 +114,7 @@ func (s *Signups) Write(ctx context.Context, in SignupWrite, isRaidLead bool) (S
 	if err != nil {
 		return Signup{}, fmt.Errorf("loading event: %w", err)
 	}
-	if err := checkDeadline(event.SignupDeadline, isRaidLead, time.Now()); err != nil {
+	if err := checkDeadline(event, &in.Status, isRaidLead, time.Now()); err != nil {
 		return Signup{}, err
 	}
 
@@ -151,7 +151,7 @@ func (s *Signups) Withdraw(ctx context.Context, eventID, characterID uuid.UUID, 
 	if err != nil {
 		return fmt.Errorf("loading event: %w", err)
 	}
-	if err := checkDeadline(event.SignupDeadline, isRaidLead, time.Now()); err != nil {
+	if err := checkDeadline(event, nil, isRaidLead, time.Now()); err != nil {
 		return err
 	}
 
@@ -173,11 +173,22 @@ func (s *Signups) List(ctx context.Context, eventID uuid.UUID) ([]Signup, error)
 	return signups, nil
 }
 
-// checkDeadline is the deadline gate: a pure function of the event's deadline, who is
-// writing, and the current time.
-func checkDeadline(deadline time.Time, isRaidLead bool, now time.Time) error {
+// checkDeadline is the deadline gate: a pure function of the event's timing, the status
+// being written, who is writing, and the current time.
+//
+// LATE and ABSENT run until the pull. Both report what is happening on the night rather
+// than an intention, and a raider who finds out at ten to eight that they are held up
+// has nothing useful to say if the gate shut an hour ago. Every other status still
+// closes at signup_deadline. status is nil on a withdrawal, which names none.
+func checkDeadline(event Event, status *db.SignupStatus, isRaidLead bool, now time.Time) error {
 	if isRaidLead {
 		return nil
+	}
+
+	deadline := event.SignupDeadline
+	if status != nil && (*status == db.SignupStatusLATE || *status == db.SignupStatusABSENT) &&
+		event.StartsAt.After(deadline) {
+		deadline = event.StartsAt
 	}
 	if now.After(deadline) {
 		return ErrSignupsClosed

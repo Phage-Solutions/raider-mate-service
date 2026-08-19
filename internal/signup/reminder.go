@@ -41,7 +41,6 @@ type reminderStore interface {
 	ListSignupsForEvent(ctx context.Context, eventID uuid.UUID) ([]Signup, error)
 	ListUndecidedForEvent(ctx context.Context, eventID uuid.UUID) ([]int64, error)
 	ListAttendingForEvent(ctx context.Context, eventID uuid.UUID) ([]AttendingSignup, error)
-	CountCompSlotsForEvent(ctx context.Context, eventID uuid.UUID) (int64, error)
 	RaidLeadRoleIDs(ctx context.Context, discordGuildID int64) ([]int64, error)
 	GuildSettings(ctx context.Context, discordGuildID int64) (GuildSettings, error)
 	InsertNotification(ctx context.Context, n Notification) error
@@ -114,8 +113,8 @@ func (r *Runner) resolve(ctx context.Context, tx reminderStore, job db.Scheduled
 }
 
 // buildNotifications resolves recipients and payloads for one job. skip means the
-// job is done (marked SENT) without writing anything: a COMP_NAG on an already-locked
-// comp, or a ROLE job with no channel_id to post in.
+// job is done (marked SENT) without writing anything: a ROLE job with no channel_id to
+// post in, or a job of a kind that is no longer sent.
 func (r *Runner) buildNotifications(ctx context.Context, tx reminderStore, job db.ScheduledJob) (notifications []Notification, skip bool, err error) {
 	event, err := tx.GetEvent(ctx, job.EventID)
 	if err != nil {
@@ -129,8 +128,10 @@ func (r *Runner) buildNotifications(ctx context.Context, tx reminderStore, job d
 		return r.buildReminderPreEvent(ctx, tx, event)
 	case db.JobEnumSIGNUPDEADLINE:
 		return r.buildSignupDeadline(ctx, tx, event)
+	// Nothing nags about an unlocked comp any more. Rows scheduled by an older release
+	// are still in the table, so they are drained rather than left to fail three times.
 	case db.JobEnumCOMPNAG:
-		return r.buildCompNag(ctx, tx, event)
+		return nil, true, nil
 	default:
 		return nil, false, fmt.Errorf("unknown job type %q", job.JobType)
 	}
@@ -306,48 +307,6 @@ func (r *Runner) buildSignupDeadline(ctx context.Context, tx reminderStore, even
 		DiscordGuildID: event.DiscordGuildID,
 		EventID:        event.ID,
 		Kind:           db.NotificationKindSIGNUPDEADLINE,
-		TargetKind:     db.NotificationTargetROLE,
-		RoleIDs:        roleIDs,
-		ChannelID:      event.ChannelID,
-		Payload:        payload,
-	}}, false, nil
-}
-
-type compNagPayload struct {
-	Title    string    `json:"title"`
-	StartsAt time.Time `json:"starts_at"`
-}
-
-// buildCompNag pings the raid lead only if nothing has been locked yet. "Locked" is
-// inferred from comp_slots existing for the event (internal/db/queries/signup.sql's
-// CountCompSlotsForEvent comment): there is no separate lock timestamp, and this is
-// true by construction, since locking is what writes slots.
-func (r *Runner) buildCompNag(ctx context.Context, tx reminderStore, event Event) ([]Notification, bool, error) {
-	count, err := tx.CountCompSlotsForEvent(ctx, event.ID)
-	if err != nil {
-		return nil, false, fmt.Errorf("counting comp slots: %w", err)
-	}
-	if count > 0 {
-		return nil, true, nil
-	}
-	if event.ChannelID == nil {
-		r.logger.WarnContext(ctx, "COMP_NAG has no channel to post in", "event_id", event.ID)
-		return nil, true, nil
-	}
-
-	roleIDs, err := tx.RaidLeadRoleIDs(ctx, event.DiscordGuildID)
-	if err != nil {
-		return nil, false, fmt.Errorf("loading raid lead roles: %w", err)
-	}
-	payload, err := json.Marshal(compNagPayload{Title: event.Title, StartsAt: event.StartsAt})
-	if err != nil {
-		return nil, false, fmt.Errorf("encoding payload: %w", err)
-	}
-
-	return []Notification{{
-		DiscordGuildID: event.DiscordGuildID,
-		EventID:        event.ID,
-		Kind:           db.NotificationKindCOMPNAG,
 		TargetKind:     db.NotificationTargetROLE,
 		RoleIDs:        roleIDs,
 		ChannelID:      event.ChannelID,

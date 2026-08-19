@@ -646,7 +646,3 @@ func (s *Store) ListAttendingForEvent(ctx context.Context, eventID uuid.UUID) ([
 	}
 	return out, nil
 }
-
-func (s *Store) CountCompSlotsForEvent(ctx context.Context, eventID uuid.UUID) (int64, error) {
-	return s.queries.CountCompSlotsForEvent(ctx, eventID)
-}

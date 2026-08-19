@@ -25,7 +25,6 @@ type fakeReminderStore struct {
 	jobs        []db.ScheduledJob
 	undecided   []int64
 	attending   []AttendingSignup
-	compSlots   int64
 	signups     []Signup
 	roleIDs     []int64
 	settings    GuildSettings
@@ -75,10 +74,6 @@ func (s *fakeReminderStore) ListAttendingForEvent(context.Context, uuid.UUID) ([
 
 func (s *fakeReminderStore) GuildSettings(context.Context, int64) (GuildSettings, error) {
 	return s.settings, nil
-}
-
-func (s *fakeReminderStore) CountCompSlotsForEvent(context.Context, uuid.UUID) (int64, error) {
-	return s.compSlots, nil
 }
 
 func (s *fakeReminderStore) RaidLeadRoleIDs(context.Context, int64) ([]int64, error) {
@@ -310,13 +305,14 @@ func TestRunDueSignupDeadlineCountsEveryStatusIncludingZeroes(t *testing.T) {
 	}
 }
 
-func TestRunDueCompNagStaysSilentOnALockedComp(t *testing.T) {
+// COMP_NAG is no longer scheduled, but rows an older release wrote are still due. They
+// drain silently rather than failing three times over an unknown job type.
+func TestRunDueDrainsAnOldCompNagWithoutNotifying(t *testing.T) {
 	channelID := int64(555)
 	jobID := uuid.New()
 	store := &fakeReminderStore{
-		event:     Event{Title: "Prog Night", ChannelID: &channelID},
-		jobs:      []db.ScheduledJob{{ID: jobID, JobType: db.JobEnumCOMPNAG}},
-		compSlots: 1, // locked: at least one slot exists
+		event: Event{Title: "Prog Night", ChannelID: &channelID},
+		jobs:  []db.ScheduledJob{{ID: jobID, JobType: db.JobEnumCOMPNAG}},
 	}
 
 	if err := NewRunner(store, newTestLogger()).RunDue(context.Background(), 10); err != nil {
@@ -324,35 +320,13 @@ func TestRunDueCompNagStaysSilentOnALockedComp(t *testing.T) {
 	}
 
 	if len(store.notified) != 0 {
-		t.Errorf("notified = %d, want none: comp is locked", len(store.notified))
+		t.Errorf("notified = %d, want none: nothing nags about comps", len(store.notified))
+	}
+	if len(store.failed) != 0 {
+		t.Errorf("failed = %+v, want none: the job completes", store.failed)
 	}
 	if len(store.sentIDs) != 1 || store.sentIDs[0] != jobID {
-		t.Errorf("sent = %v, want [%s]: the job still completes", store.sentIDs, jobID)
-	}
-}
-
-func TestRunDueCompNagFiresWhenNothingIsLocked(t *testing.T) {
-	channelID := int64(555)
-	store := &fakeReminderStore{
-		event:     Event{Title: "Prog Night", ChannelID: &channelID, DiscordGuildID: 100},
-		jobs:      []db.ScheduledJob{{ID: uuid.New(), JobType: db.JobEnumCOMPNAG}},
-		compSlots: 0,
-		roleIDs:   []int64{781, 799},
-	}
-
-	if err := NewRunner(store, newTestLogger()).RunDue(context.Background(), 10); err != nil {
-		t.Fatalf("RunDue: %v", err)
-	}
-
-	if len(store.notified) != 1 {
-		t.Fatalf("notified = %d, want 1", len(store.notified))
-	}
-	n := store.notified[0]
-	if n.Kind != db.NotificationKindCOMPNAG || n.TargetKind != db.NotificationTargetROLE {
-		t.Errorf("notification = %+v, want a COMP_NAG ROLE row", n)
-	}
-	if len(n.RoleIDs) != 2 {
-		t.Errorf("role_ids = %v, want the mapped raid lead roles", n.RoleIDs)
+		t.Errorf("sent = %v, want [%s]", store.sentIDs, jobID)
 	}
 }
 

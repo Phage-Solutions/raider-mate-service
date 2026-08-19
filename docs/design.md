@@ -219,7 +219,7 @@ character_snapshots (
 scheduled_jobs (
   id          uuid PK,
   event_id    uuid FK,
-  job_type    job_enum,   -- SIGNUP_DEADLINE | REMINDER_24H | REMINDER_PRE_EVENT | COMP_NAG
+  job_type    job_enum,   -- SIGNUP_DEADLINE | REMINDER_24H | REMINDER_PRE_EVENT
   run_at      timestamptz,
   status      job_status, -- PENDING | SENT | FAILED | CANCELED
   attempts    smallint
@@ -384,7 +384,10 @@ edit/delete rather than validating at fire time.
 | `REMINDER_24H` | DM the **undecided only**. Don't ping people who already signed |
 | `REMINDER_PRE_EVENT` | Tell **everyone signed up** the event is about to start |
 | `SIGNUP_DEADLINE` | Lock signups, ping raid lead that comp needs finalising |
-| `COMP_NAG` | Ping raid lead if comp isn't locked 2h out |
+
+`COMP_NAG` is still a `job_enum` value and a `notification_kind`, but nothing schedules
+one and nothing sends one: locking a comp is optional, so an unlocked one is not a
+problem to chase. Rows written by an older release are drained without notifying.
 
 `REMINDER_PRE_EVENT` is the one job whose timing a guild controls.
 `events.reminder_lead_minutes` is resolved when the event is created, from the request,
@@ -402,6 +405,12 @@ seat.
 
 After `signup_deadline`, signups go read-only for players; raid leads can still add
 manually. Late signups land in a requests queue rather than silently failing.
+
+`LATE` and `ABSENT` are the exception, and stay writable for players until `starts_at`.
+Both report what is happening on the night rather than an intention, and a raider who
+finds out an hour before the pull that they are held up has nothing useful to say if the
+gate shut with the deadline. A withdrawal names no status and still closes at the
+deadline.
 
 Not every notification traces back to a scheduled job. `LATE_REQUEST_FILED`,
 `ROSTER_UPDATED`, and `COMP_SLOT_DROPPED` fire on a write, the moment there is
