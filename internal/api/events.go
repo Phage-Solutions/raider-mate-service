@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -103,6 +104,10 @@ type createEventRequest struct {
 	Difficulty     *string         `json:"difficulty,omitempty"`
 	// ReminderLeadMinutes omitted means the guild default. 0 means no reminder.
 	ReminderLeadMinutes *int32 `json:"reminder_lead_minutes,omitempty"`
+	// Announce asks the service to queue the signup sheet for the bot to post. The bot
+	// posts its own and leaves this out; a client with no way to write in Discord sets
+	// it, and the guild's events channel has to be configured for it to work.
+	Announce bool `json:"announce,omitempty"`
 }
 
 // maxReminderLeadMinutes is a day. Past that the 24-hour reminder is the one that
@@ -170,8 +175,15 @@ func createEventHandler(events *signup.Events, logger *slog.Logger) http.Handler
 			Difficulty:     difficulty,
 
 			ReminderLeadMinutes: body.ReminderLeadMinutes,
+			Announce:            body.Announce,
 		})
 		if err != nil {
+			// A guild-state problem the caller can fix, not a server fault: they asked
+			// for an announcement in a guild that has not said where events go.
+			if errors.Is(err, signup.ErrNoEventsChannel) {
+				writeError(w, logger, http.StatusConflict, err.Error())
+				return
+			}
 			logger.ErrorContext(r.Context(), "creating event", "error", err)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
 			return
@@ -361,6 +373,64 @@ func deleteEventHandler(events *signup.Events, logger *slog.Logger) http.Handler
 
 		if err := events.Delete(r.Context(), id); err != nil {
 			logger.ErrorContext(r.Context(), "deleting event", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+type putEventMessageRequest struct {
+	ChannelID string `json:"channel_id"`
+	MessageID string `json:"message_id"`
+}
+
+// putEventMessageHandler records the post the bot made for an event it was told to
+// announce. It takes the shared key alone and no actor headers, the same reasoning as
+// the notifications and catalog routes: this is the bot reporting its own action, not
+// something done on a raider's behalf.
+//
+// The bot cannot use PATCH /api/events/{id} for this. A poller has no interaction to
+// read a member from, so it speaks as itself with no roles, and PATCH is raid lead
+// only. Without this route an announced event would be posted and then immediately
+// forgotten, leaving nothing for a redraw or a reminder to find.
+func putEventMessageHandler(events *signup.Events, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathUUID(r, "id")
+		if err != nil {
+			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		var body putEventMessageRequest
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		channelID, err := strconv.ParseInt(body.ChannelID, 10, 64)
+		if err != nil {
+			writeError(w, logger, http.StatusBadRequest, "channel_id: "+err.Error())
+			return
+		}
+		messageID, err := strconv.ParseInt(body.MessageID, 10, 64)
+		if err != nil {
+			writeError(w, logger, http.StatusBadRequest, "message_id: "+err.Error())
+			return
+		}
+
+		if _, err := events.Get(r.Context(), id); err != nil {
+			writeError(w, logger, http.StatusNotFound, "event not found")
+			return
+		}
+
+		if _, err := events.Update(r.Context(), signup.UpdateEventInput{
+			ID:        id,
+			MessageID: &messageID,
+			ChannelID: &channelID,
+		}); err != nil {
+			logger.ErrorContext(r.Context(), "recording event message", "error", err, "event_id", id)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
 			return
 		}

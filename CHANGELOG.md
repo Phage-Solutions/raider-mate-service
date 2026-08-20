@@ -12,6 +12,71 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-20
+
+### Added
+
+- **Events can be created by a client that cannot post in Discord.** `POST
+  /api/guilds/{gid}/events` takes an `announce` flag: set it, and the service queues the
+  event's signup sheet for the bot to post in the guild's events channel, in the same
+  transaction as the event itself. Without it an event made outside Discord had no
+  message and no channel, so no signup sheet went up and every later reminder found
+  nowhere to speak. The bot posts its own sheet and leaves the flag out, so `/raid
+  create` is unchanged.
+
+  An announced create in a guild with no events channel set is refused with 409 rather
+  than half-done. There is no sensible fallback: unlike a slash command, the caller is
+  not standing in a channel.
+- `PUT /api/events/{id}/message` records the post the bot made for an announced event.
+  It takes the service key alone, like the notification and catalogue routes, because a
+  poller has no member to speak as and so cannot pass the raid-lead check `PATCH
+  /api/events/{id}` makes.
+- The capabilities response carries a `create-event` link, separate from `configure`.
+  Running a raid belongs to the mapped raid-lead roles alone, so an admin who holds none
+  of them gets the Configuration entry and no way to create an event, matching what
+  `POST` actually enforces.
+- `GET /api/guilds/{gid}/capabilities` answers "what may I do in this guild", carrying
+  `is_raid_lead`, `is_guild_admin` and a `configure` link. It exists so a client can
+  decide what to put in front of somebody without keeping its own copy of the rules:
+  raid-lead capability is resolved here from the guild's mapped roles, and a dashboard
+  recomputing it from role ids would be a second implementation of the one rule that
+  decides who runs a raid. Open to anyone in the guild, since it reports only what the
+  caller themselves may do.
+- `GET /api/users/{did}/guilds` returns the guilds Raider Mate actually knows a person
+  in, which is not the same as the servers they are in on Discord. It is the one route
+  that reaches past the actor's guild, because it is asked in order to decide which
+  guild to work in, so `{did}` must be the caller themselves and anything else is a 403.
+  The list is joined through characters: a user row with nothing attached would send a
+  client to a guild with an empty roster. Clients can now stop making people pick their
+  guild out of every Discord server they have ever joined.
+
+### Changed
+
+- Guild configuration is open to raid leads as well as Discord admins. The raid-lead
+  role mapping, the event settings, and the Discord role and channel catalogue behind
+  them all now accept either. Configuring how raids run is a raid lead's job, and a raid
+  lead who could not set the events channel had to go and find an admin. Admins keep it
+  too, which is what keeps the bootstrap open: raid leads are defined on that page, so a
+  guild that has mapped nothing still has somebody who can map it.
+- **A guild can no longer unmap its way out of running raids.** `PUT
+  /api/guilds/{gid}/raid-lead-roles` refuses any set that leaves out the guild's highest
+  Discord role, answering 400 rather than saving it. Unticking everything, or ticking
+  only a role nobody holds, used to leave a guild unable to create an event with nothing
+  in the product explaining why. A guild whose roles the bot has not catalogued yet is
+  unaffected, since there is no highest role to insist on.
+- **Raid-lead capability now comes from the guild's mapped roles and nothing else.**
+  Discord's own administrator flag used to qualify on its own; it no longer does.
+  Creating, editing and deleting events, approving late requests and locking comps all
+  need one of the roles the guild mapped. Everyone else manages their own characters and
+  signups, which is unchanged.
+
+  This is a behaviour change for any guild relying on the admin shortcut: an admin
+  holding no mapped raid-lead role loses those actions, and their `_links` stop offering
+  them. Bootstrapping still works, because mapping raid-lead roles and editing guild
+  settings are gated on the admin flag separately, so an admin of a fresh guild maps a
+  role and then holds the capability through it like everyone else. A guild that has
+  mapped nothing now grants the capability to nobody at all.
+
 ## [0.5.0] - 2026-08-20
 
 ### Added

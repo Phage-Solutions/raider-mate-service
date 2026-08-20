@@ -86,22 +86,24 @@ func TestResolveIsRaidLeadForAnUnmappedRole(t *testing.T) {
 	}
 }
 
-func TestResolveIsRaidLeadAdminFallback(t *testing.T) {
+func TestResolveIsRaidLeadIgnoresTheDiscordAdminFlag(t *testing.T) {
+	// Administering a Discord server and running raids are different jobs. An admin
+	// holding no mapped role manages their characters like anybody else.
 	actor := Actor{IsGuildAdmin: true, RoleIDs: []uint64{555}}
-	if !resolveIsRaidLead(actor, []uint64{781, 799}) {
-		t.Errorf("resolveIsRaidLead = false, want true: admins always qualify")
+	if resolveIsRaidLead(actor, []uint64{781, 799}) {
+		t.Errorf("resolveIsRaidLead = true, want false: 555 is not a mapped raid-lead role")
 	}
 }
 
-func TestResolveIsRaidLeadEmptyMappingBootstrap(t *testing.T) {
+func TestResolveIsRaidLeadGrantsNobodyOnAnUnmappedGuild(t *testing.T) {
 	admin := Actor{IsGuildAdmin: true}
-	if !resolveIsRaidLead(admin, nil) {
-		t.Errorf("resolveIsRaidLead(admin, nil) = false, want true: bootstrap treats admins as raid leads")
+	if resolveIsRaidLead(admin, nil) {
+		t.Errorf("resolveIsRaidLead(admin, nil) = true, want false: nobody has said who runs raids yet")
 	}
 
 	player := Actor{RoleIDs: []uint64{555}}
 	if resolveIsRaidLead(player, nil) {
-		t.Errorf("resolveIsRaidLead(player, nil) = true, want false: an unmapped guild grants nobody else the capability")
+		t.Errorf("resolveIsRaidLead(player, nil) = true, want false: an unmapped guild grants nobody the capability")
 	}
 }
 

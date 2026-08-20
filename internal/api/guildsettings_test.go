@@ -59,13 +59,29 @@ func TestGuildSettingsAreReadableByAnyMember(t *testing.T) {
 	if got.EventsChannelID == nil || *got.EventsChannelID != "555" {
 		t.Errorf("events_channel_id = %v, want the snowflake as a string", got.EventsChannelID)
 	}
-	// A non-admin may see where events go, but not change it.
+	// A raider may see where events go, but not change it.
 	if _, ok := got.Links["replace"]; ok {
-		t.Error("links has replace for a non-admin, want the absence of a link to be the answer")
+		t.Error("links has replace for a plain raider, want the absence of a link to be the answer")
 	}
 }
 
-func TestWritingGuildSettingsNeedsAnAdmin(t *testing.T) {
+func TestWritingGuildSettingsIsRefusedToAPlainRaider(t *testing.T) {
+	store := &fakeSettingsStore{}
+	settings := signup.NewSettings(store)
+
+	w := httptest.NewRecorder()
+	putGuildSettingsHandler(settings, testLogger())(w,
+		settingsRequest(http.MethodPut, homeActor(false), `{"events_channel_id":"555"}`))
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for a raider who is neither raid lead nor admin", w.Code)
+	}
+	if store.written != nil {
+		t.Error("settings were written, want the request refused before persistence")
+	}
+}
+
+func TestARaidLeadWritesGuildSettings(t *testing.T) {
 	store := &fakeSettingsStore{}
 	settings := signup.NewSettings(store)
 
@@ -73,11 +89,11 @@ func TestWritingGuildSettingsNeedsAnAdmin(t *testing.T) {
 	putGuildSettingsHandler(settings, testLogger())(w,
 		settingsRequest(http.MethodPut, homeActor(true), `{"events_channel_id":"555"}`))
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403: a raid lead is not an admin", w.Code)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: setting where events go is a raid lead's job", w.Code)
 	}
-	if store.written != nil {
-		t.Error("settings were written, want the request refused before persistence")
+	if store.written == nil {
+		t.Error("settings were not written")
 	}
 }
 

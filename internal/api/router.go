@@ -37,6 +37,8 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *s
 
 	apiMux := http.NewServeMux()
 
+	apiMux.HandleFunc("GET /api/guilds/{gid}/capabilities", getGuildCapabilitiesHandler(logger))
+
 	apiMux.HandleFunc("GET /api/guilds/{gid}/raid-lead-roles", listRaidLeadRolesHandler(raidLeads, logger))
 	apiMux.HandleFunc("PUT /api/guilds/{gid}/raid-lead-roles", putRaidLeadRolesHandler(raidLeads, logger))
 
@@ -49,6 +51,7 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *s
 	apiMux.HandleFunc("POST /api/guilds/{gid}/characters", createCharacterHandler(characters, logger))
 	apiMux.HandleFunc("GET /api/guilds/{gid}/characters", listGuildCharactersHandler(characters, logger))
 	apiMux.HandleFunc("GET /api/users/{did}/characters", listUserCharactersHandler(characters, logger))
+	apiMux.HandleFunc("GET /api/users/{did}/guilds", listUserGuildsHandler(characters, logger))
 	apiMux.HandleFunc("PATCH /api/characters/{cid}", patchCharacterHandler(characters, logger))
 	apiMux.HandleFunc("DELETE /api/characters/{cid}", deleteCharacterHandler(characters, logger))
 	apiMux.HandleFunc("GET /api/characters/{cid}/roles", getCharacterRolesHandler(characters, logger))
@@ -94,6 +97,12 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *s
 		requireServiceKey(putGuildChannelsHandler(catalog, logger), apiKey, logger))
 	mux.Handle("PUT /api/guilds/{gid}/discord-roles",
 		requireServiceKey(putGuildRolesHandler(catalog, logger), apiKey, logger))
+
+	// The bot telling the service where it posted an event it was asked to announce.
+	// Service key alone for the same reason as the catalog pushes above: a poller has
+	// no member to speak as, so it cannot pass the raid-lead check PATCH makes.
+	mux.Handle("PUT /api/events/{id}/message",
+		requireServiceKey(putEventMessageHandler(events, logger), apiKey, logger))
 
 	return recoverPanic(logRequests(mux, logger), logger)
 }

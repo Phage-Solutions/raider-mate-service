@@ -255,6 +255,50 @@ func listUserCharactersHandler(characters *roster.Characters, logger *slog.Logge
 	}
 }
 
+type userGuildResponse struct {
+	DiscordGuildID string `json:"discord_guild_id"`
+}
+
+// listUserGuildsHandler returns the guilds Raider Mate knows a person in.
+//
+// This is the one route that deliberately reaches past the actor's guild, because it is
+// asked in order to decide which guild to work in, before there is a meaningful one in
+// the headers. That makes it the one route where {did} has to be the caller themselves:
+// without the check, a raid lead in any guild could enumerate which other guilds a
+// raider belongs to, which is nobody's business and is not visible anywhere else.
+//
+// No _links: every guild-scoped route is bound to the actor's own guild, so a link to
+// another guild's collection would be a link that answers 403. The absence of a link
+// means unavailable, and inventing one here would break that promise.
+func listUserGuildsHandler(characters *roster.Characters, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor, _ := actorFromContext(r.Context())
+
+		discordID, err := pathSnowflake(r, "did")
+		if err != nil {
+			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+		if discordID != int64(actor.DiscordID) { //nolint:gosec
+			writeError(w, logger, http.StatusForbidden, "you may only list your own guilds")
+			return
+		}
+
+		guilds, err := characters.ListGuildsForUser(r.Context(), discordID)
+		if err != nil {
+			logger.ErrorContext(r.Context(), "listing guilds for user", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+			return
+		}
+
+		out := make([]userGuildResponse, len(guilds))
+		for i, g := range guilds {
+			out[i] = userGuildResponse{DiscordGuildID: strconv.FormatInt(g, 10)}
+		}
+		writeJSON(w, logger, http.StatusOK, out)
+	}
+}
+
 // requireCharacterInGuild resolves a {cid} path segment to a character in the actor's
 // guild. Reading a guildmate's character is allowed: their name and role menu are
 // already visible on every signup list and comp board in the guild.

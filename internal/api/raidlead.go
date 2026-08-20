@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -30,8 +31,8 @@ func raidLeadRolesLinks(guildID int64, isAdmin bool) Links {
 func listRaidLeadRolesHandler(raidLeads *signup.RaidLeads, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
-		if !actor.IsGuildAdmin {
-			writeError(w, logger, http.StatusForbidden, "guild admin required")
+		if !actor.MayConfigureGuild() {
+			writeError(w, logger, http.StatusForbidden, "guild admin or raid lead required")
 			return
 		}
 
@@ -59,8 +60,8 @@ func listRaidLeadRolesHandler(raidLeads *signup.RaidLeads, logger *slog.Logger) 
 func putRaidLeadRolesHandler(raidLeads *signup.RaidLeads, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
-		if !actor.IsGuildAdmin {
-			writeError(w, logger, http.StatusForbidden, "guild admin required")
+		if !actor.MayConfigureGuild() {
+			writeError(w, logger, http.StatusForbidden, "guild admin or raid lead required")
 			return
 		}
 
@@ -81,6 +82,12 @@ func putRaidLeadRolesHandler(raidLeads *signup.RaidLeads, logger *slog.Logger) h
 		}
 
 		if err := raidLeads.Replace(r.Context(), guildID, roleIDs); err != nil {
+			// A caller error, not a server one: they asked for a mapping that would
+			// leave the guild unable to run a raid.
+			if errors.Is(err, signup.ErrHighestRoleRequired) {
+				writeError(w, logger, http.StatusBadRequest, err.Error())
+				return
+			}
 			logger.ErrorContext(r.Context(), "replacing raid lead roles", "error", err)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
 			return

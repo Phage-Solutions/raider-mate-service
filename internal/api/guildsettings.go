@@ -87,7 +87,7 @@ func getGuildSettingsHandler(settings *signup.Settings, logger *slog.Logger) htt
 			return
 		}
 
-		writeJSON(w, logger, http.StatusOK, settingsToResponse(current, guildID, actor.IsGuildAdmin))
+		writeJSON(w, logger, http.StatusOK, settingsToResponse(current, guildID, actor.MayConfigureGuild()))
 	}
 }
 
@@ -97,8 +97,8 @@ func getGuildSettingsHandler(settings *signup.Settings, logger *slog.Logger) htt
 func putGuildSettingsHandler(settings *signup.Settings, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
-		if !actor.IsGuildAdmin {
-			writeError(w, logger, http.StatusForbidden, "guild admin required")
+		if !actor.MayConfigureGuild() {
+			writeError(w, logger, http.StatusForbidden, "guild admin or raid lead required")
 			return
 		}
 

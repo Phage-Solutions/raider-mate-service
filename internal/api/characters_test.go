@@ -32,6 +32,11 @@ type fakeCharacterStore struct {
 	// exists makes RegisterCharacter report the raider already has this name, realm
 	// and region, which the real store maps from a 23505 on the unique index.
 	exists bool
+
+	// guilds is what ListGuildsForDiscordUser answers, and askedAbout records who it
+	// was asked about, so a test can prove the guard refused before querying.
+	guilds     []int64
+	askedAbout int64
 }
 
 func (f *fakeCharacterStore) RegisterCharacter(context.Context, roster.RegisterInput) (roster.Character, error) {
@@ -376,4 +381,9 @@ func TestCreateCharacterReturnsTheRegisteredCharacter(t *testing.T) {
 	if got.ID != id.String() {
 		t.Errorf("id = %s, want %s", got.ID, id)
 	}
+}
+
+func (f *fakeCharacterStore) ListGuildsForDiscordUser(_ context.Context, discordID int64) ([]int64, error) {
+	f.askedAbout = discordID
+	return f.guilds, nil
 }

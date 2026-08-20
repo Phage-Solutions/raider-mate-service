@@ -241,6 +241,7 @@ const (
 	NotificationKindLATEREQUESTFILED NotificationKind = "LATE_REQUEST_FILED"
 	NotificationKindROSTERUPDATED    NotificationKind = "ROSTER_UPDATED"
 	NotificationKindCOMPSLOTDROPPED  NotificationKind = "COMP_SLOT_DROPPED"
+	NotificationKindEVENTCREATED     NotificationKind = "EVENT_CREATED"
 )
 
 func (e *NotificationKind) Scan(src interface{}) error {

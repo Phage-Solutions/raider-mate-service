@@ -270,6 +270,10 @@ func (s *Store) ListCharactersInGuild(ctx context.Context, discordGuildID int64)
 	return charactersFromRows(rows)
 }
 
+func (s *Store) ListGuildsForDiscordUser(ctx context.Context, discordID int64) ([]int64, error) {
+	return s.queries.ListGuildsForDiscordUser(ctx, discordID)
+}
+
 func (s *Store) ListCharactersByDiscord(ctx context.Context, discordID, discordGuildID int64) ([]Character, error) {
 	rows, err := s.queries.ListCharactersByDiscord(ctx, db.ListCharactersByDiscordParams{
 		DiscordID: discordID, DiscordGuildID: discordGuildID,

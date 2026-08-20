@@ -44,15 +44,29 @@ func catalogRequest(method, path string, actor Actor, body string) *http.Request
 	return r
 }
 
-func TestGuildChannelsRequireAnAdminToRead(t *testing.T) {
+func TestGuildChannelsAreRefusedToAPlainRaider(t *testing.T) {
+	catalog := signup.NewGuildCatalog(&fakeCatalogStore{})
+
+	w := httptest.NewRecorder()
+	// The catalogue exists to fill in the configuration screens, so it follows the same
+	// rule they do: raid leads and admins, nobody else.
+	listGuildChannelsHandler(catalog, testLogger())(w,
+		catalogRequest(http.MethodGet, "/api/guilds/100/discord-channels", homeActor(false), ""))
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for a raider who is neither raid lead nor admin", w.Code)
+	}
+}
+
+func TestGuildChannelsAreReadableByARaidLead(t *testing.T) {
 	catalog := signup.NewGuildCatalog(&fakeCatalogStore{})
 
 	w := httptest.NewRecorder()
 	listGuildChannelsHandler(catalog, testLogger())(w,
 		catalogRequest(http.MethodGet, "/api/guilds/100/discord-channels", homeActor(true), ""))
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403: a raid lead is not an admin", w.Code)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: a raid lead configures the guild", w.Code)
 	}
 }
 
@@ -123,15 +137,29 @@ func TestAnUnknownChannelTypeIsRejected(t *testing.T) {
 	}
 }
 
-func TestGuildRolesRequireAnAdminToRead(t *testing.T) {
+func TestGuildRolesAreRefusedToAPlainRaider(t *testing.T) {
+	catalog := signup.NewGuildCatalog(&fakeCatalogStore{})
+
+	w := httptest.NewRecorder()
+	// The catalogue exists to fill in the configuration screens, so it follows the same
+	// rule they do: raid leads and admins, nobody else.
+	listGuildRolesHandler(catalog, testLogger())(w,
+		catalogRequest(http.MethodGet, "/api/guilds/100/discord-roles", homeActor(false), ""))
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for a raider who is neither raid lead nor admin", w.Code)
+	}
+}
+
+func TestGuildRolesAreReadableByARaidLead(t *testing.T) {
 	catalog := signup.NewGuildCatalog(&fakeCatalogStore{})
 
 	w := httptest.NewRecorder()
 	listGuildRolesHandler(catalog, testLogger())(w,
 		catalogRequest(http.MethodGet, "/api/guilds/100/discord-roles", homeActor(true), ""))
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403: a raid lead is not an admin", w.Code)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: a raid lead configures the guild", w.Code)
 	}
 }
 

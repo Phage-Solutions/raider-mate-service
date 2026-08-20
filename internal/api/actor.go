@@ -46,20 +46,39 @@ func actorFromHeaders(h http.Header) (Actor, error) {
 	return Actor{DiscordID: discordID, GuildID: guildID, RoleIDs: roleIDs, IsGuildAdmin: isAdmin}, nil
 }
 
-// resolveIsRaidLead decides IsRaidLead from the admin flag and a guild's mapped
-// role IDs. An admin always qualifies. A guild with no mapped roles treats Discord
-// admins as raid leads (the case above) and nobody else, so a fresh install is
-// never bricked without silently granting the capability to every member.
+// resolveIsRaidLead decides IsRaidLead from a guild's mapped role IDs, and from
+// nothing else. Holding one of the roles the guild mapped is the whole test.
+//
+// Discord's own administrator flag used to qualify on its own, as a bootstrap so a
+// guild that had mapped nothing was not stuck. It no longer does, because running
+// raids and administering a Discord server are different jobs and plenty of guilds
+// hand the second to people who should not be editing the raid schedule. The bootstrap
+// still works without the shortcut: mapping raid-lead roles and editing guild settings
+// are gated on IsGuildAdmin separately, so an admin of a fresh guild maps a role and
+// then holds the capability through it, like everyone else.
+//
+// A guild with no mapped roles therefore grants the capability to nobody, which is the
+// honest reading of "nobody has said who runs raids yet".
 func resolveIsRaidLead(actor Actor, raidLeadRoleIDs []uint64) bool {
-	if actor.IsGuildAdmin {
-		return true
-	}
 	for _, role := range actor.RoleIDs {
 		if slices.Contains(raidLeadRoleIDs, role) {
 			return true
 		}
 	}
 	return false
+}
+
+// MayConfigureGuild reports whether an actor may read and change a guild's
+// configuration: its raid-lead role mapping, its event settings, and the Discord
+// catalogue behind both.
+//
+// Discord admins and raid leads both qualify. Running the server and running its raids
+// are different jobs, but configuring how raids run is squarely the second one, and a
+// raid lead who cannot set the events channel has to go and find an admin for it. The
+// admin half also keeps the bootstrap open: raid leads are defined here, so a guild
+// that has mapped nothing still has someone who can map it.
+func (a Actor) MayConfigureGuild() bool {
+	return a.IsGuildAdmin || a.IsRaidLead
 }
 
 // parseSnowflake parses a Discord snowflake. It stays a string on the wire and

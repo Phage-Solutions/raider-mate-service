@@ -2,6 +2,7 @@ package signup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -44,7 +45,16 @@ type CreateEventInput struct {
 	// ReminderLeadMinutes is nil when the raid lead did not say, and the store resolves
 	// it from the guild settings.
 	ReminderLeadMinutes *int32
+	// Announce asks the service to queue the event's signup sheet for posting. The bot
+	// creates its own post and leaves this false; a client that has no way to post in
+	// Discord sets it, and the guild's events channel is where the sheet goes.
+	Announce bool
 }
+
+// ErrNoEventsChannel means an announced create was asked for in a guild that has not
+// said where events go. There is no sensible fallback: the caller is not in a Discord
+// channel, so unlike the bot there is no "here" to post in.
+var ErrNoEventsChannel = errors.New("guild has no events channel configured")
 
 // UpdateEventInput is a partial edit: a nil field leaves the stored value alone. A
 // message_id/channel_id-only edit (the bot learning its own post) is a legal,

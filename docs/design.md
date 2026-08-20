@@ -584,6 +584,11 @@ and helping strangers with their Postgres.
 4. **Sync worker** not yet designed: Raider.IO rate limits, backoff, snapshot writes.
 5. **Billing webhooks** not yet designed: Stripe/Paddle → `subscriptions` sync.
 
+Not a question, a commitment already made in public and not yet built: erasure 30 days
+after a guild removes the bot, and erasure on a raider's own request. The hosted
+instance's privacy policy states both. See [data-retention.md](data-retention.md) for
+what is missing and the shape of the work. This is the next piece of work in this repo.
+
 ---
 
 ## 11. Suggested v0.1

@@ -55,6 +55,7 @@ type characterStore interface {
 	ReplaceCharacterRoles(ctx context.Context, characterID uuid.UUID, roles []RoleChoice) error
 	ListCharacterRoles(ctx context.Context, characterID uuid.UUID) ([]RoleChoice, error)
 	ListRolesForCharacters(ctx context.Context, characterIDs []uuid.UUID) (map[uuid.UUID][]RoleChoice, error)
+	ListGuildsForDiscordUser(ctx context.Context, discordID int64) ([]int64, error)
 }
 
 // Characters registers characters and manages their role menus. Roles live here,
@@ -149,6 +150,20 @@ func (c *Characters) ListForUser(ctx context.Context, discordID, discordGuildID 
 		return nil, fmt.Errorf("listing characters: %w", err)
 	}
 	return characters, nil
+}
+
+// ListGuildsForUser returns the guilds Raider Mate knows this person in, soonest use
+// first being meaningless here, so ordered by id for a stable answer.
+//
+// Deliberately not scoped to a guild: it is the one question that cannot be, because it
+// is asked precisely to find out which guild to work in. Callers must confirm the
+// requester is asking about themselves.
+func (c *Characters) ListGuildsForUser(ctx context.Context, discordID int64) ([]int64, error) {
+	guilds, err := c.store.ListGuildsForDiscordUser(ctx, discordID)
+	if err != nil {
+		return nil, fmt.Errorf("listing guilds for user: %w", err)
+	}
+	return guilds, nil
 }
 
 // ErrCharacterNotFound means no such character exists in that guild. Whether it

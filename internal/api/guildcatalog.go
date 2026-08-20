@@ -48,8 +48,8 @@ func channelsToDTO(channels []signup.Channel) []discordChannelDTO {
 func listGuildChannelsHandler(catalog *signup.GuildCatalog, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
-		if !actor.IsGuildAdmin {
-			writeError(w, logger, http.StatusForbidden, "guild admin required")
+		if !actor.MayConfigureGuild() {
+			writeError(w, logger, http.StatusForbidden, "guild admin or raid lead required")
 			return
 		}
 
@@ -154,8 +154,8 @@ func rolesToDTO(roles []signup.Role) []discordRoleDTO {
 func listGuildRolesHandler(catalog *signup.GuildCatalog, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
-		if !actor.IsGuildAdmin {
-			writeError(w, logger, http.StatusForbidden, "guild admin required")
+		if !actor.MayConfigureGuild() {
+			writeError(w, logger, http.StatusForbidden, "guild admin or raid lead required")
 			return
 		}
 

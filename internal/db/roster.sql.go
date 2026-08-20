@@ -398,6 +398,37 @@ func (q *Queries) ListCharactersInGuild(ctx context.Context, discordGuildID int6
 	return items, nil
 }
 
+const listGuildsForDiscordUser = `-- name: ListGuildsForDiscordUser :many
+SELECT DISTINCT u.discord_guild_id
+FROM users u
+JOIN characters c ON c.user_id = u.id
+WHERE u.discord_id = $1
+ORDER BY u.discord_guild_id
+`
+
+// The guilds Raider Mate actually knows this person in, which is not the same as the
+// guilds they are in on Discord. Joined through characters on purpose: a users row with
+// nothing attached would send a client to a guild with an empty roster.
+func (q *Queries) ListGuildsForDiscordUser(ctx context.Context, discordID int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listGuildsForDiscordUser, discordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var discord_guild_id int64
+		if err := rows.Scan(&discord_guild_id); err != nil {
+			return nil, err
+		}
+		items = append(items, discord_guild_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markCharacterSyncAttempted = `-- name: MarkCharacterSyncAttempted :exec
 UPDATE characters SET sync_attempted_at = now()
 WHERE id = $1

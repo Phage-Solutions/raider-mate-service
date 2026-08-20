@@ -29,6 +29,27 @@ func (q *Queries) DeleteGuildRoles(ctx context.Context, discordGuildID int64) er
 	return err
 }
 
+const highestGuildRole = `-- name: HighestGuildRole :one
+SELECT discord_role_id FROM guild_roles
+WHERE discord_guild_id = $1 AND discord_role_id <> discord_guild_id
+ORDER BY position DESC, discord_role_id DESC
+LIMIT 1
+`
+
+// The top of the guild's role hierarchy, which is the one raid-lead mapping that may
+// never be removed. Ties break on id so the answer does not move between calls.
+//
+// The bot already leaves @everyone and integration-managed roles out of this catalogue,
+// so this filter is belt rather than braces. It is here because the two ship on separate
+// cycles: an older bot that pushed @everyone would make it the guild's highest role, and
+// pinning that as a raid-lead role hands the capability to every member.
+func (q *Queries) HighestGuildRole(ctx context.Context, discordGuildID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, highestGuildRole, discordGuildID)
+	var discord_role_id int64
+	err := row.Scan(&discord_role_id)
+	return discord_role_id, err
+}
+
 const insertGuildChannel = `-- name: InsertGuildChannel :exec
 INSERT INTO guild_channels (discord_guild_id, discord_channel_id, name, type)
 VALUES ($1, $2, $3, $4)

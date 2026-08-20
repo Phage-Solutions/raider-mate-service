@@ -132,3 +132,13 @@ WHERE id = $1;
 -- fresher; only the queue position moves.
 UPDATE characters SET sync_attempted_at = now()
 WHERE id = $1;
+
+-- name: ListGuildsForDiscordUser :many
+-- The guilds Raider Mate actually knows this person in, which is not the same as the
+-- guilds they are in on Discord. Joined through characters on purpose: a users row with
+-- nothing attached would send a client to a guild with an empty roster.
+SELECT DISTINCT u.discord_guild_id
+FROM users u
+JOIN characters c ON c.user_id = u.id
+WHERE u.discord_id = $1
+ORDER BY u.discord_guild_id;

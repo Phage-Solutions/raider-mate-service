@@ -104,14 +104,26 @@ func (s *Store) CreateEvent(ctx context.Context, in CreateEventInput) (Event, er
 
 	q := s.queries.WithTx(tx)
 
+	// Announce needs the events channel, and an unstated lead needs the guild default,
+	// so the settings are read once for whichever of the two applies.
+	var settings GuildSettings
+	if in.ReminderLeadMinutes == nil || in.Announce {
+		settings, err = guildSettings(ctx, q, in.DiscordGuildID)
+		if err != nil {
+			return Event{}, fmt.Errorf("reading guild settings: %w", err)
+		}
+	}
+
+	// Refused before the insert rather than after: an announced event nobody can be
+	// told about is worse than no event, and the caller can fix the setting and retry.
+	if in.Announce && settings.EventsChannelID == nil {
+		return Event{}, ErrNoEventsChannel
+	}
+
 	// Resolved here rather than at fire time: the effective lead is stored on the event,
 	// so changing the guild default later cannot re-time a raid that is already posted.
 	lead := in.ReminderLeadMinutes
 	if lead == nil {
-		settings, err := guildSettings(ctx, q, in.DiscordGuildID)
-		if err != nil {
-			return Event{}, fmt.Errorf("reading guild settings: %w", err)
-		}
 		resolved := settings.ReminderLead()
 		lead = &resolved
 	}
@@ -133,6 +145,22 @@ func (s *Store) CreateEvent(ctx context.Context, in CreateEventInput) (Event, er
 
 	if err := scheduleJobs(ctx, q, row.ID, in.StartsAt, in.SignupDeadline, *lead); err != nil {
 		return Event{}, err
+	}
+
+	// In the same transaction as the event, so there is no window in which an announced
+	// event exists with nothing queued to announce it.
+	if in.Announce {
+		if _, err := q.InsertNotification(ctx, db.InsertNotificationParams{
+			ID:             db.NewID(),
+			DiscordGuildID: in.DiscordGuildID,
+			EventID:        row.ID,
+			Kind:           db.NotificationKindEVENTCREATED,
+			TargetKind:     db.NotificationTargetCHANNEL,
+			ChannelID:      settings.EventsChannelID,
+			Payload:        []byte("{}"),
+		}); err != nil {
+			return Event{}, fmt.Errorf("queueing event announcement: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -417,6 +445,19 @@ func (s *Store) RaidLeadRoleIDs(ctx context.Context, discordGuildID int64) ([]in
 // ReplaceRaidLeadRoleIDs overwrites a guild's whole mapping in one transaction: a
 // PUT that half-applies would leave a stale role granting the capability alongside
 // the caller's intended set.
+// HighestGuildRoleID reports the top of a guild's role hierarchy. No rows means the
+// bot has not catalogued this guild's roles yet, which is not an error.
+func (s *Store) HighestGuildRoleID(ctx context.Context, discordGuildID int64) (int64, bool, error) {
+	id, err := s.queries.HighestGuildRole(ctx, discordGuildID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return id, true, nil
+}
+
 func (s *Store) ReplaceRaidLeadRoleIDs(ctx context.Context, discordGuildID int64, roleIDs []int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
