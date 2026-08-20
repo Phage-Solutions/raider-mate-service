@@ -132,6 +132,9 @@ func (s *Signups) Write(ctx context.Context, in SignupWrite, isRaidLead bool) (S
 			return fmt.Errorf("writing signup: %w", err)
 		}
 		signup = written
+		if err := notifySignupChanged(ctx, tx, event); err != nil {
+			return err
+		}
 		return notifyCompSlotsDropped(ctx, tx, s.logger, event, in.CharacterID, &in.Status, droppedFrom)
 	})
 	if err != nil {
@@ -159,6 +162,9 @@ func (s *Signups) Withdraw(ctx context.Context, eventID, characterID uuid.UUID, 
 		droppedFrom, err := tx.DeleteSignup(ctx, eventID, characterID)
 		if err != nil {
 			return fmt.Errorf("withdrawing signup: %w", err)
+		}
+		if err := notifySignupChanged(ctx, tx, event); err != nil {
+			return err
 		}
 		return notifyCompSlotsDropped(ctx, tx, s.logger, event, characterID, nil, droppedFrom)
 	})
@@ -192,6 +198,34 @@ func checkDeadline(event Event, status *db.SignupStatus, isRaidLead bool, now ti
 	}
 	if now.After(deadline) {
 		return ErrSignupsClosed
+	}
+	return nil
+}
+
+// notifySignupChanged asks the bot to redraw the event message, because the answers it
+// is showing have just changed.
+//
+// The bot redraws by itself only for its own button clicks. Every other route into a
+// signup, the dashboard above all, used to leave the message in the channel showing an
+// answer nobody had given for minutes or hours. This closes that.
+//
+// MESSAGE target and an empty payload: there is no sentence to write. The bot re-reads
+// the event and rebuilds the card, which is why this notification does not need the bot
+// to understand the kind. An event with no message to edit gets nothing queued, so a
+// bot that has not posted one yet is not handed work it cannot do.
+func notifySignupChanged(ctx context.Context, store compNotifier, event Event) error {
+	if event.ChannelID == nil || event.MessageID == nil {
+		return nil
+	}
+	if err := store.InsertNotification(ctx, Notification{
+		DiscordGuildID: event.DiscordGuildID,
+		EventID:        event.ID,
+		Kind:           db.NotificationKindSIGNUPCHANGED,
+		TargetKind:     db.NotificationTargetMESSAGE,
+		ChannelID:      event.ChannelID,
+		Payload:        []byte("{}"),
+	}); err != nil {
+		return fmt.Errorf("writing signup-changed notification: %w", err)
 	}
 	return nil
 }

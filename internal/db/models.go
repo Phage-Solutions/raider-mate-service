@@ -242,6 +242,7 @@ const (
 	NotificationKindROSTERUPDATED    NotificationKind = "ROSTER_UPDATED"
 	NotificationKindCOMPSLOTDROPPED  NotificationKind = "COMP_SLOT_DROPPED"
 	NotificationKindEVENTCREATED     NotificationKind = "EVENT_CREATED"
+	NotificationKindSIGNUPCHANGED    NotificationKind = "SIGNUP_CHANGED"
 )
 
 func (e *NotificationKind) Scan(src interface{}) error {

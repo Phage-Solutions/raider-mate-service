@@ -381,3 +381,74 @@ func TestWithdrawRejectsAPlayerPastTheDeadline(t *testing.T) {
 		t.Errorf("deleted %d signups, want none", len(store.deleted))
 	}
 }
+
+// postedEvent is an event the bot has already posted a message for, which is the only
+// state a redraw makes sense in.
+func postedEvent() Event {
+	channelID, messageID := int64(42), int64(777)
+	return Event{
+		SignupDeadline: time.Now().Add(time.Hour),
+		ChannelID:      &channelID,
+		MessageID:      &messageID,
+	}
+}
+
+func TestWriteAsksForARedrawOfTheEventMessage(t *testing.T) {
+	store := newFakeSignupStore()
+	store.event = postedEvent()
+
+	if _, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{
+		Status: db.SignupStatusCONFIRMED,
+	}, false); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if len(store.notified) != 1 {
+		t.Fatalf("queued %d notifications, want 1", len(store.notified))
+	}
+	n := store.notified[0]
+	if n.Kind != db.NotificationKindSIGNUPCHANGED {
+		t.Errorf("kind = %v, want SIGNUP_CHANGED", n.Kind)
+	}
+	// MESSAGE is what makes this an edit of the card rather than something written at
+	// somebody. A bot reads the target before it reads the kind.
+	if n.TargetKind != db.NotificationTargetMESSAGE {
+		t.Errorf("target = %v, want MESSAGE", n.TargetKind)
+	}
+}
+
+func TestWithdrawAsksForARedrawOfTheEventMessage(t *testing.T) {
+	store := newFakeSignupStore()
+	store.event = postedEvent()
+
+	if err := NewSignups(store, newTestLogger()).Withdraw(
+		context.Background(), uuid.New(), uuid.New(), false,
+	); err != nil {
+		t.Fatalf("Withdraw: %v", err)
+	}
+
+	if len(store.notified) != 1 {
+		t.Fatalf("queued %d notifications, want 1", len(store.notified))
+	}
+	if got := store.notified[0].Kind; got != db.NotificationKindSIGNUPCHANGED {
+		t.Errorf("kind = %v, want SIGNUP_CHANGED", got)
+	}
+}
+
+// An event the bot never posted has no message to edit. Queueing a redraw for it would
+// hand the poller work it can only log and drop.
+func TestWriteAsksForNoRedrawWhenThereIsNoMessageToEdit(t *testing.T) {
+	channelID := int64(42)
+	store := newFakeSignupStore()
+	store.event = Event{SignupDeadline: time.Now().Add(time.Hour), ChannelID: &channelID}
+
+	if _, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{
+		Status: db.SignupStatusCONFIRMED,
+	}, false); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if len(store.notified) != 0 {
+		t.Errorf("queued %d notifications, want none", len(store.notified))
+	}
+}

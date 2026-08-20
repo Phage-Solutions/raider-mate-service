@@ -12,6 +12,23 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-20
+
+### Added
+
+- **A signup written outside Discord now redraws the event message.** Writing a signup,
+  withdrawing one, and approving a late request each queue a `SIGNUP_CHANGED`
+  notification, and the bot edits the card in the channel. Until now the bot redrew only
+  for its own button clicks and for a Raider.IO sync, so anything a raider did in the
+  dashboard left the post in Discord showing answers nobody had given any more.
+
+  It is a `MESSAGE` notification with an empty payload: there is no sentence to write,
+  the bot rebuilds the card from the event itself. An event the bot has not posted yet
+  queues nothing, since there is no message to edit. Migration `00009` adds the value.
+
+  Pair it with the bot release that collapses a burst of redraws into one edit, or a
+  raid answering all at once costs one message edit each.
+
 ## [0.6.1] - 2026-08-20
 
 ### Fixed

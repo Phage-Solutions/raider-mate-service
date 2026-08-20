@@ -206,14 +206,21 @@ func (l *LateRequests) Approve(ctx context.Context, id uuid.UUID) error {
 			return fmt.Errorf("marking late request approved: %w", err)
 		}
 
+		event, err := tx.GetEvent(ctx, req.EventID)
+		if err != nil {
+			return fmt.Errorf("loading event: %w", err)
+		}
+		// An approval puts a raider back on the sheet, so the message is now wrong in
+		// the channel everyone reads. Unconditional, unlike the dropped-slot notice
+		// below, which only applies when a locked comp lost a seat.
+		if err := notifySignupChanged(ctx, tx, event); err != nil {
+			return err
+		}
+
 		// Approving a request carrying DECLINED is the case that strands a seat: the
 		// raid lead accepted a withdrawal filed after the comp was locked.
 		if len(droppedFrom) == 0 {
 			return nil
-		}
-		event, err := tx.GetEvent(ctx, req.EventID)
-		if err != nil {
-			return fmt.Errorf("loading event: %w", err)
 		}
 		return notifyCompSlotsDropped(ctx, tx, l.logger, event, req.CharacterID, &req.Status, droppedFrom)
 	})
