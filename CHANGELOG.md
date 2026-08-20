@@ -12,6 +12,19 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-20
+
+### Fixed
+
+- **A guild could not save its settings once it had set a timezone.** Every write came
+  back as `400 timezone: unknown zone`, including a write that only meant to change the
+  reminder delivery: the settings form sends the whole row, so it kept re-submitting the
+  stored zone and kept being refused it.
+
+  The zone database is now compiled into the binary. The runtime image ships none, so
+  `time.LoadLocation` could resolve nothing, and any deployed instance rejected every
+  IANA name there is while a developer's machine accepted all of them.
+
 ## [0.6.0] - 2026-08-20
 
 ### Added

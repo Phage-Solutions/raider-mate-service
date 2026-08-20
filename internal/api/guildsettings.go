@@ -8,6 +8,16 @@ import (
 	"strconv"
 	"time"
 
+	// The zone database, compiled into the binary. parseTimezone below is the only
+	// caller of time.LoadLocation, and without this it can only resolve a zone the
+	// runtime image happens to ship. The one this service deploys on does not ship any,
+	// so every guild that had set a timezone was refused its own stored value on the
+	// next settings write, with "unknown zone" as the reason.
+	//
+	// Imported here rather than in cmd/api, so it travels with the code that needs it
+	// and a second binary cannot lose it.
+	_ "time/tzdata"
+
 	"github.com/Phage-Solutions/raider-mate-service/internal/db"
 	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
 )
