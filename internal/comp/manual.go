@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -20,6 +21,13 @@ var (
 	// ErrInvalidBoard means the board could not be written as given. This covers only
 	// what the schema itself would reject, never a judgement about the composition.
 	ErrInvalidBoard = errors.New("invalid board")
+	// ErrCompNameTaken means the event already has a comp under the requested name.
+	// A comp is keyed (event_id, name), so the two would be the same comp.
+	ErrCompNameTaken = errors.New("comp name taken")
+	// ErrCompNotFound means there is no comp on this event under that name.
+	ErrCompNotFound = errors.New("comp not found")
+	// ErrInvalidName means the requested name is not one a comp can be keyed by.
+	ErrInvalidName = errors.New("invalid comp name")
 )
 
 // ManualReason is the reason recorded against every hand-placed slot. comp_slots.reason
@@ -42,6 +50,7 @@ type manualStore interface {
 	CompMode(ctx context.Context, eventID uuid.UUID, compName string) (db.CompMode, bool, error)
 	SetCompMode(ctx context.Context, eventID uuid.UUID, compName string, mode db.CompMode) error
 	ReplaceComp(ctx context.Context, arg ReplaceComp) error
+	RenameComp(ctx context.Context, eventID uuid.UUID, from, to string) error
 }
 
 // Manual is the raid-lead-driven half of comp building: whole-board saves for comps the
@@ -86,6 +95,41 @@ func (m *Manual) Save(ctx context.Context, eventID uuid.UUID, compName string, p
 	}
 
 	return nil
+}
+
+// Rename moves a comp to a new name, slots and all. The mode is irrelevant: a name is
+// a label a raid lead chose, not a claim on who owns the board, so an auto comp
+// renames exactly like a manual one.
+//
+// Trimmed but not otherwise policed. The name is part of the comp's key and appears in
+// Discord, so an empty one is refused; what a raid lead calls their second Mythic group
+// is their business.
+// It answers with the comp's mode, which the rename leaves alone. The caller needs it
+// to describe the comp it just moved, and reading it is already part of checking the
+// comp is there at all.
+func (m *Manual) Rename(ctx context.Context, eventID uuid.UUID, from, to string) (db.CompMode, error) {
+	to = strings.TrimSpace(to)
+	if to == "" {
+		return "", fmt.Errorf("renaming comp %q: %w", from, ErrInvalidName)
+	}
+
+	mode, found, err := m.store.CompMode(ctx, eventID, from)
+	if err != nil {
+		return "", fmt.Errorf("reading comp mode: %w", err)
+	}
+	if !found {
+		return "", fmt.Errorf("renaming comp %q: %w", from, ErrCompNotFound)
+	}
+
+	// Opening the field and closing it again is not a write.
+	if to == from {
+		return mode, nil
+	}
+
+	if err := m.store.RenameComp(ctx, eventID, from, to); err != nil {
+		return "", err
+	}
+	return mode, nil
 }
 
 // SetMode converts a comp between raid-lead-owned and assigner-owned. Its slots are

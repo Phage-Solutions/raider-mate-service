@@ -18,6 +18,10 @@ type fakeCompStore struct {
 	modes    map[string]db.CompMode
 	written  []ReplaceComp
 	modeSets []db.CompMode
+	renames  [][2]string
+	// renameErr is what the store answers, standing in for the unique violation the
+	// real one reads a taken name off.
+	renameErr error
 }
 
 func newFakeCompStore() *fakeCompStore {
@@ -44,6 +48,16 @@ func (s *fakeCompStore) ReplaceComp(_ context.Context, arg ReplaceComp) error {
 	if _, ok := s.modes[arg.CompName]; !ok {
 		s.modes[arg.CompName] = arg.Mode
 	}
+	return nil
+}
+
+func (s *fakeCompStore) RenameComp(_ context.Context, _ uuid.UUID, from, to string) error {
+	if s.renameErr != nil {
+		return s.renameErr
+	}
+	s.renames = append(s.renames, [2]string{from, to})
+	s.modes[to] = s.modes[from]
+	delete(s.modes, from)
 	return nil
 }
 
@@ -223,5 +237,90 @@ func TestSetModeConvertsWithoutTouchingSlots(t *testing.T) {
 	}
 	if len(store.written) != 0 {
 		t.Errorf("wrote %d comps, want none: converting keeps the assigner's last output", len(store.written))
+	}
+}
+
+func TestRenameMovesTheCompAndItsSlots(t *testing.T) {
+	store := newFakeCompStore()
+	store.modes["prog"] = db.CompModeMANUAL
+
+	if _, err := NewManual(store).Rename(context.Background(), uuid.New(), "prog", "Mythic B"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	if len(store.renames) != 1 || store.renames[0] != [2]string{"prog", "Mythic B"} {
+		t.Fatalf("renames = %v, want one prog to Mythic B", store.renames)
+	}
+	// The board is not rewritten to change a label: the slots follow the name through
+	// the foreign key rather than being deleted and inserted again.
+	if len(store.written) != 0 {
+		t.Errorf("wrote %d comps, want none: a rename must not cost the board", len(store.written))
+	}
+}
+
+// A name is a label, not a claim on who owns the board. Both modes rename alike.
+func TestRenameWorksOnAnAutoComp(t *testing.T) {
+	store := newFakeCompStore()
+	store.modes["prog"] = db.CompModeAUTO
+
+	if _, err := NewManual(store).Rename(context.Background(), uuid.New(), "prog", "Heroic"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if store.modes["Heroic"] != db.CompModeAUTO {
+		t.Errorf("mode = %s, want the comp to keep AUTO through a rename", store.modes["Heroic"])
+	}
+}
+
+func TestRenameTrimsAndRefusesAnEmptyName(t *testing.T) {
+	for _, name := range []string{"", "   ", "\t"} {
+		store := newFakeCompStore()
+		store.modes["prog"] = db.CompModeMANUAL
+
+		_, err := NewManual(store).Rename(context.Background(), uuid.New(), "prog", name)
+
+		if !errors.Is(err, ErrInvalidName) {
+			t.Errorf("Rename(%q) err = %v, want ErrInvalidName", name, err)
+		}
+		if len(store.renames) != 0 {
+			t.Errorf("Rename(%q) wrote a rename, want none", name)
+		}
+	}
+}
+
+func TestRenameRefusesAnUnknownComp(t *testing.T) {
+	store := newFakeCompStore()
+
+	_, err := NewManual(store).Rename(context.Background(), uuid.New(), "nothing", "something")
+
+	if !errors.Is(err, ErrCompNotFound) {
+		t.Fatalf("err = %v, want ErrCompNotFound", err)
+	}
+}
+
+// Renaming to the name it already has is what a raid lead opening the field and
+// closing it again produces. It is not an error and it is not a write.
+func TestRenameToTheSameNameDoesNothing(t *testing.T) {
+	store := newFakeCompStore()
+	store.modes["prog"] = db.CompModeMANUAL
+
+	if _, err := NewManual(store).Rename(context.Background(), uuid.New(), "prog", "prog"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if len(store.renames) != 0 {
+		t.Errorf("renames = %v, want none", store.renames)
+	}
+}
+
+// The store reads a taken name off a unique violation; Manual passes it through
+// unwrapped enough for the API to answer 409 rather than 500.
+func TestRenameSurfacesATakenName(t *testing.T) {
+	store := newFakeCompStore()
+	store.modes["prog"] = db.CompModeMANUAL
+	store.renameErr = ErrCompNameTaken
+
+	_, err := NewManual(store).Rename(context.Background(), uuid.New(), "prog", "Mythic")
+
+	if !errors.Is(err, ErrCompNameTaken) {
+		t.Fatalf("err = %v, want ErrCompNameTaken", err)
 	}
 }

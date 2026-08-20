@@ -40,6 +40,13 @@ ORDER BY name;
 UPDATE comps SET mode = $3
 WHERE event_id = $1 AND name = $2;
 
+-- name: RenameComp :exec
+-- The slots follow, through the ON UPDATE CASCADE added in migration 00011. Renaming
+-- rather than rebuilding is the point: changing a label should not cost the board
+-- underneath it.
+UPDATE comps SET name = sqlc.arg(new_name)
+WHERE event_id = sqlc.arg(event_id) AND name = sqlc.arg(name);
+
 -- name: DeleteComp :exec
 DELETE FROM comps
 WHERE event_id = $1 AND name = $2;

@@ -12,6 +12,43 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-20
+
+### Added
+
+- **A comp can be renamed.** `PATCH /api/events/{id}/comps/{name}` takes
+  `{"name": "..."}` and moves the comp, its slots and all, answering the comp's new
+  `_links`. Raid lead only, and offered as a `rename` link in both modes: a name is a
+  label a raid lead chose, not a claim on who owns the board.
+
+  The name is trimmed and must not be empty. A name another comp on the same event
+  already uses answers `409`, since a comp is keyed `(event_id, name)` and the two would
+  be the same comp. Renaming a comp to the name it already has is a no-op, not an error.
+
+### Fixed
+
+- **A comp written from the dashboard never reached Discord.** Saving a hand-built
+  board, locking one, renaming one, or converting one between auto and manual all wrote
+  the comp and queued nothing, so the event message in the channel went on showing the
+  previous board until some unrelated signup write happened to redraw it.
+
+  Every comp write now queues a redraw in the same transaction as the write, so a write
+  that rolls back cannot leave one queued for a board nobody saved. This needs no bot
+  change: the bot already rebuilds the card for any `MESSAGE`-target notification before
+  it looks at the kind, and coalesces them, so a burst of edits is still one edit of the
+  message.
+
+  The new `COMP_CHANGED` kind is there to keep the outbox honest about what happened
+  rather than to be dispatched on. An event the bot has not posted yet queues nothing,
+  because there is no message to edit.
+
+### Changed
+
+- `comp_slots` now cascades a comp rename through its foreign key
+  (`ON UPDATE CASCADE`). Without it the comp name was effectively immutable: no order of
+  writes across the two tables satisfied the constraint, so a rename would have meant
+  deleting the board and rebuilding it.
+
 ## [0.7.0] - 2026-08-20
 
 ### Changed

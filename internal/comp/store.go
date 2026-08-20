@@ -8,11 +8,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phage-Solutions/raider-mate-service/internal/db"
 )
+
+// uniqueViolation is Postgres SQLSTATE 23505. Two comps on one event cannot share a
+// name, and that is the constraint a rename runs into.
+const uniqueViolation = "23505"
 
 // Store implements compStore over Postgres.
 type Store struct {
@@ -142,10 +147,80 @@ func (s *Store) ListCompSlots(ctx context.Context, eventID uuid.UUID, compName s
 	return out, nil
 }
 
+// queueRedraw asks the bot to rebuild this event's message in Discord.
+//
+// The same trade a signup write makes: the board just changed, and the card in the
+// channel goes on showing the old one until something says otherwise. MESSAGE target
+// and an empty payload, because there is no sentence to write. The bot re-reads the
+// event and redraws it, which is why it does not need to understand this kind to
+// deliver it.
+//
+// Written in the caller's transaction, so a comp write that rolls back cannot leave a
+// redraw queued for a board nobody saved. An event with no message posted yet gets
+// nothing: there is nothing to edit, and the bot would be handed work it cannot do.
+func queueRedraw(ctx context.Context, q *db.Queries, eventID uuid.UUID) error {
+	event, err := q.GetEvent(ctx, eventID)
+	if err != nil {
+		return fmt.Errorf("loading event to redraw: %w", err)
+	}
+	if event.ChannelID == nil || event.MessageID == nil {
+		return nil
+	}
+	if _, err := q.InsertNotification(ctx, db.InsertNotificationParams{
+		ID:             db.NewID(),
+		DiscordGuildID: event.DiscordGuildID,
+		EventID:        eventID,
+		Kind:           db.NotificationKindCOMPCHANGED,
+		TargetKind:     db.NotificationTargetMESSAGE,
+		ChannelID:      event.ChannelID,
+		Payload:        []byte("{}"),
+	}); err != nil {
+		return fmt.Errorf("queueing comp redraw: %w", err)
+	}
+	return nil
+}
+
+// inTx runs one comp write and the redraw it earns as a single unit.
+func (s *Store) inTx(ctx context.Context, eventID uuid.UUID, write func(*db.Queries) error) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	q := s.queries.WithTx(tx)
+	if err := write(q); err != nil {
+		return err
+	}
+	if err := queueRedraw(ctx, q, eventID); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing tx: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) SetCompMode(ctx context.Context, eventID uuid.UUID, compName string, mode db.CompMode) error {
-	return s.queries.SetCompMode(ctx, db.SetCompModeParams{
-		EventID: eventID, Name: compName, Mode: mode,
+	return s.inTx(ctx, eventID, func(q *db.Queries) error {
+		return q.SetCompMode(ctx, db.SetCompModeParams{
+			EventID: eventID, Name: compName, Mode: mode,
+		})
 	})
+}
+
+// RenameComp moves a comp and its slots to a new name. A name already in use on this
+// event comes back as ErrCompNameTaken rather than a raw unique violation.
+func (s *Store) RenameComp(ctx context.Context, eventID uuid.UUID, from, to string) error {
+	err := s.inTx(ctx, eventID, func(q *db.Queries) error {
+		return q.RenameComp(ctx, db.RenameCompParams{EventID: eventID, Name: from, NewName: to})
+	})
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+		return fmt.Errorf("renaming comp %q to %q: %w", from, to, ErrCompNameTaken)
+	}
+	return err
 }
 
 func (s *Store) ReplaceComp(ctx context.Context, arg ReplaceComp) error {
@@ -202,6 +277,13 @@ func (s *Store) ReplaceComp(ctx context.Context, arg ReplaceComp) error {
 		}); err != nil {
 			return fmt.Errorf("setting assigned role for %s: %w", a.CharacterID, err)
 		}
+	}
+
+	// The one place both routes into a board converge: Lock comes through here and so
+	// does Manual.Save, so queueing the redraw here covers both without either having
+	// to remember to.
+	if err := queueRedraw(ctx, q, arg.EventID); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(ctx); err != nil {

@@ -305,6 +305,25 @@ func (q *Queries) ListRolesForCharacters(ctx context.Context, characterIds []uui
 	return items, nil
 }
 
+const renameComp = `-- name: RenameComp :exec
+UPDATE comps SET name = $1
+WHERE event_id = $2 AND name = $3
+`
+
+type RenameCompParams struct {
+	NewName string
+	EventID uuid.UUID
+	Name    string
+}
+
+// The slots follow, through the ON UPDATE CASCADE added in migration 00011. Renaming
+// rather than rebuilding is the point: changing a label should not cost the board
+// underneath it.
+func (q *Queries) RenameComp(ctx context.Context, arg RenameCompParams) error {
+	_, err := q.db.Exec(ctx, renameComp, arg.NewName, arg.EventID, arg.Name)
+	return err
+}
+
 const setCompMode = `-- name: SetCompMode :exec
 UPDATE comps SET mode = $3
 WHERE event_id = $1 AND name = $2

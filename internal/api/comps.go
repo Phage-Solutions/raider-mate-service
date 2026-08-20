@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -48,6 +49,9 @@ func compHref(eventID, name string) string {
 // compLinks is the HATEOAS decision for one comp. lock is absent on a manual comp
 // and save is absent on an auto one, because each would be refused: the two modes own
 // their slots exclusively, and the absent link is the answer.
+//
+// rename is offered in both modes. A name is a label a raid lead chose, not a claim on
+// who owns the board, so nothing about the mode makes it more or less renameable.
 func compLinks(eventID, name string, mode db.CompMode, isRaidLead bool) Links {
 	href := compHref(eventID, name)
 	links := Links{}
@@ -55,6 +59,7 @@ func compLinks(eventID, name string, mode db.CompMode, isRaidLead bool) Links {
 	links.add(isRaidLead && mode != db.CompModeMANUAL, "lock", href+"/lock", "POST")
 	links.add(isRaidLead && mode == db.CompModeMANUAL, "save", href, "PUT")
 	links.add(isRaidLead, "mode", href+"/mode", "PUT")
+	links.add(isRaidLead, "rename", href, "PATCH")
 	return links
 }
 
@@ -337,6 +342,63 @@ func setCompModeHandler(manual *comp.Manual, events eventLookup, logger *slog.Lo
 			Name: name, Mode: string(mode),
 			Links: compLinks(eventID.String(), name, mode, true),
 		})
+	}
+}
+
+type renameCompRequest struct {
+	Name string `json:"name"`
+}
+
+// renameCompHandler moves a comp to a new name. Raid lead only.
+//
+// The slots come with it. A rename is a label change, and rebuilding the board to
+// perform one would throw away exactly the work the name is being changed to describe.
+func renameCompHandler(manual *comp.Manual, events eventLookup, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor, _ := actorFromContext(r.Context())
+		if !actor.IsRaidLead {
+			writeError(w, logger, http.StatusForbidden, "raid lead required")
+			return
+		}
+
+		eventID, err := pathUUID(r, "id")
+		if err != nil {
+			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+		name := r.PathValue("name")
+
+		if _, ok := requireEventInGuild(w, r, events, logger, eventID); !ok {
+			return
+		}
+
+		var body renameCompRequest
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, logger, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		mode, err := manual.Rename(r.Context(), eventID, name, body.Name)
+		switch {
+		case errors.Is(err, comp.ErrInvalidName):
+			writeError(w, logger, http.StatusBadRequest, "name: must not be empty")
+		case errors.Is(err, comp.ErrCompNotFound):
+			writeError(w, logger, http.StatusNotFound, "comp not found")
+		case errors.Is(err, comp.ErrCompNameTaken):
+			writeError(w, logger, http.StatusConflict, "this event already has a comp with that name")
+		case err != nil:
+			logger.ErrorContext(r.Context(), "renaming comp", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+		default:
+			// The name it now answers to, which is not always the one that was sent:
+			// Rename trims, and a caller that posted padding needs the trimmed value to
+			// build its next request against.
+			renamed := strings.TrimSpace(body.Name)
+			writeJSON(w, logger, http.StatusOK, compInfoResponse{
+				Name: renamed, Mode: string(mode),
+				Links: compLinks(eventID.String(), renamed, mode, true),
+			})
+		}
 	}
 }
 

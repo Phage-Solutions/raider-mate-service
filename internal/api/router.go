@@ -74,6 +74,7 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *s
 	apiMux.HandleFunc("GET /api/events/{id}/comps", listCompsHandler(reader, events, logger))
 	apiMux.HandleFunc("GET /api/events/{id}/comps/{name}", getCompHandler(reader, characters, events, logger))
 	apiMux.HandleFunc("PUT /api/events/{id}/comps/{name}", saveCompHandler(manual, characters, events, logger))
+	apiMux.HandleFunc("PATCH /api/events/{id}/comps/{name}", renameCompHandler(manual, events, logger))
 	apiMux.HandleFunc("PUT /api/events/{id}/comps/{name}/mode", setCompModeHandler(manual, events, logger))
 	apiMux.HandleFunc("POST /api/events/{id}/comps/{name}/lock", lockCompHandler(locker, characters, events, logger))
 
