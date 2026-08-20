@@ -161,6 +161,18 @@ func (s *Store) ListUpcomingEvents(ctx context.Context, discordGuildID int64) ([
 	return events, nil
 }
 
+func (s *Store) ListPastEvents(ctx context.Context, discordGuildID int64) ([]Event, error) {
+	rows, err := s.queries.ListPastEvents(ctx, discordGuildID)
+	if err != nil {
+		return nil, err
+	}
+	events := make([]Event, len(rows))
+	for i, row := range rows {
+		events[i] = eventFromRow(row)
+	}
+	return events, nil
+}
+
 // UpdateEvent applies a partial edit and, whenever StartsAt or SignupDeadline moved,
 // cancels every PENDING job for the event and reschedules from the new times, all in
 // one transaction (design.md section 6: cancel on edit rather than validating at fire
@@ -182,6 +194,7 @@ func (s *Store) UpdateEvent(ctx context.Context, in UpdateEventInput) (Event, er
 		MessageID:           in.MessageID,
 		ChannelID:           in.ChannelID,
 		ReminderLeadMinutes: in.ReminderLeadMinutes,
+		WarcraftlogsUrl:     in.WarcraftLogsURL,
 	}
 	if in.StartsAt != nil {
 		params.StartsAt = pgtype.Timestamptz{Time: *in.StartsAt, Valid: true}
@@ -247,6 +260,7 @@ func eventFromRow(row db.Event) Event {
 		Difficulty:     row.Difficulty,
 
 		ReminderLeadMinutes: row.ReminderLeadMinutes,
+		WarcraftLogsURL:     row.WarcraftlogsUrl,
 	}
 }
 

@@ -27,6 +27,9 @@ type Event struct {
 	// event that is already posted. Zero means no reminder. Nil only on events created
 	// before the setting existed.
 	ReminderLeadMinutes *int32
+	// WarcraftLogsURL is the report a raid lead attached after the night. Nil until
+	// somebody attaches one, and most events never get one.
+	WarcraftLogsURL *string
 }
 
 // CreateEventInput is what a raid lead POSTs to create an event.
@@ -56,6 +59,9 @@ type UpdateEventInput struct {
 	MessageID           *int64
 	ChannelID           *int64
 	ReminderLeadMinutes *int32
+	// WarcraftLogsURL is the one field this edit can also clear: a pointer to the empty
+	// string takes the log back off the event, where nil still means leave it alone.
+	WarcraftLogsURL *string
 }
 
 // eventStore is the persistence Events needs. Declared here, by the consumer.
@@ -63,6 +69,7 @@ type eventStore interface {
 	CreateEvent(ctx context.Context, in CreateEventInput) (Event, error)
 	GetEvent(ctx context.Context, id uuid.UUID) (Event, error)
 	ListUpcomingEvents(ctx context.Context, discordGuildID int64) ([]Event, error)
+	ListPastEvents(ctx context.Context, discordGuildID int64) ([]Event, error)
 	UpdateEvent(ctx context.Context, in UpdateEventInput) (Event, error)
 	DeleteEvent(ctx context.Context, id uuid.UUID) error
 }
@@ -102,6 +109,18 @@ func (e *Events) ListUpcoming(ctx context.Context, discordGuildID int64) ([]Even
 	events, err := e.store.ListUpcomingEvents(ctx, discordGuildID)
 	if err != nil {
 		return nil, fmt.Errorf("listing events: %w", err)
+	}
+	return events, nil
+}
+
+// ListPast returns a guild's events that have already started, most recent first. It is
+// the complement of ListUpcoming: every event is in exactly one of the two, and the
+// boundary is the event's start rather than its end, because the service is not told
+// how long a raid runs.
+func (e *Events) ListPast(ctx context.Context, discordGuildID int64) ([]Event, error) {
+	events, err := e.store.ListPastEvents(ctx, discordGuildID)
+	if err != nil {
+		return nil, fmt.Errorf("listing past events: %w", err)
 	}
 	return events, nil
 }

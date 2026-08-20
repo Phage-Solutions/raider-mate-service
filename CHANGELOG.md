@@ -12,6 +12,23 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-20
+
+### Added
+
+- `GET /api/guilds/{gid}/events?scope=past` returns a guild's events that have already
+  started, most recent first. `scope=upcoming` and no `scope` at all both behave as
+  before, so nothing needs to change in the bot or the dashboard until they want the
+  past list. The split is on `starts_at`, since nothing here is told how long a raid
+  runs.
+- Events carry a `warcraftlogs_url`, set by hand from `PATCH /api/events/{id}`. Raid
+  leads get a `set-warcraftlogs` link on the event and everyone gets a `warcraftlogs`
+  link once a report is attached, so clients render the control and the report from
+  the links rather than from a permission rule of their own. Sending `""` takes the
+  report back off. The URL is checked for shape only (an `https` `warcraftlogs.com`
+  report link, stripped of the fight and player the raid lead happened to be looking
+  at when they copied it); the service never contacts WarcraftLogs.
+
 ## [0.4.0] - 2026-08-19
 
 ### Changed

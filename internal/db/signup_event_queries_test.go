@@ -421,3 +421,99 @@ func TestLateSignupRequestReRequestUpsertsRatherThanDuplicating(t *testing.T) {
 		t.Errorf("status = %s, want DECLINED from the re-request", all[0].Status)
 	}
 }
+
+// seedEventAt creates one event for guild 100 starting at the given offset from now,
+// which is what tells the two list queries apart.
+func seedEventAt(ctx context.Context, t *testing.T, q *Queries, title string, offset time.Duration) Event {
+	t.Helper()
+
+	at := time.Now().Add(offset)
+	event, err := q.CreateEvent(ctx, CreateEventParams{
+		ID:             NewID(),
+		DiscordGuildID: 100,
+		Type:           EventTypeRAID,
+		Title:          title,
+		StartsAt:       dbTimestamptz(at),
+		SignupDeadline: dbTimestamptz(at.Add(-time.Hour)),
+		CompTemplate:   []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("creating event %s: %v", title, err)
+	}
+	return event
+}
+
+func TestListPastAndUpcomingEventsSplitOnStart(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	older := seedEventAt(ctx, t, q, "Two weeks ago", -14*24*time.Hour)
+	recent := seedEventAt(ctx, t, q, "Last night", -12*time.Hour)
+	soon := seedEventAt(ctx, t, q, "Thursday", 48*time.Hour)
+
+	past, err := q.ListPastEvents(ctx, 100)
+	if err != nil {
+		t.Fatalf("listing past events: %v", err)
+	}
+	// Most recent first: a raid lead attaching a log wants last night, not the guild's
+	// first ever raid.
+	wantPast := []uuid.UUID{recent.ID, older.ID}
+	if len(past) != len(wantPast) {
+		t.Fatalf("past events = %d, want %d", len(past), len(wantPast))
+	}
+	for i, want := range wantPast {
+		if past[i].ID != want {
+			t.Errorf("past[%d].ID = %v, want %v", i, past[i].ID, want)
+		}
+	}
+
+	upcoming, err := q.ListUpcomingEvents(ctx, 100)
+	if err != nil {
+		t.Fatalf("listing upcoming events: %v", err)
+	}
+	if len(upcoming) != 1 || upcoming[0].ID != soon.ID {
+		t.Fatalf("upcoming events = %v, want only %v", upcoming, soon.ID)
+	}
+}
+
+func TestUpdateEventSetsAndClearsTheWarcraftLogsURL(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	event := seedEventAt(ctx, t, q, "Last night", -12*time.Hour)
+	if event.WarcraftlogsUrl != nil {
+		t.Fatalf("warcraftlogs_url = %v on a new event, want nil", event.WarcraftlogsUrl)
+	}
+
+	report := "https://www.warcraftlogs.com/reports/aBcD1234"
+	attached, err := q.UpdateEvent(ctx, UpdateEventParams{ID: event.ID, WarcraftlogsUrl: &report})
+	if err != nil {
+		t.Fatalf("attaching report: %v", err)
+	}
+	if attached.WarcraftlogsUrl == nil || *attached.WarcraftlogsUrl != report {
+		t.Fatalf("warcraftlogs_url = %v, want %q", attached.WarcraftlogsUrl, report)
+	}
+
+	// A title-only edit must not drop the report, the same as every other field here.
+	title := "Last night (heroic)"
+	kept, err := q.UpdateEvent(ctx, UpdateEventParams{ID: event.ID, Title: &title})
+	if err != nil {
+		t.Fatalf("editing title: %v", err)
+	}
+	if kept.WarcraftlogsUrl == nil || *kept.WarcraftlogsUrl != report {
+		t.Errorf("warcraftlogs_url = %v after a title edit, want it unchanged at %q", kept.WarcraftlogsUrl, report)
+	}
+
+	// The empty string is the sentinel that takes the log back off.
+	empty := ""
+	cleared, err := q.UpdateEvent(ctx, UpdateEventParams{ID: event.ID, WarcraftlogsUrl: &empty})
+	if err != nil {
+		t.Fatalf("clearing report: %v", err)
+	}
+	if cleared.WarcraftlogsUrl != nil {
+		t.Errorf("warcraftlogs_url = %v after clearing, want nil", cleared.WarcraftlogsUrl)
+	}
+	if cleared.Title != title {
+		t.Errorf("title = %q after clearing the report, want it unchanged at %q", cleared.Title, title)
+	}
+}

@@ -24,7 +24,10 @@ type eventResponse struct {
 	// ReminderLeadMinutes is the resolved lead time rather than what the caller asked
 	// for: a create that named none reads back the guild default. 0 means no reminder.
 	ReminderLeadMinutes *int32 `json:"reminder_lead_minutes,omitempty"`
-	Links               Links  `json:"_links"`
+	// WarcraftLogsURL is absent until a raid lead attaches a report. Clients render the
+	// warcraftlogs link rather than building this URL themselves.
+	WarcraftLogsURL *string `json:"warcraftlogs_url,omitempty"`
+	Links           Links   `json:"_links"`
 }
 
 func eventToResponse(e signup.Event, actor Actor) eventResponse {
@@ -37,6 +40,15 @@ func eventToResponse(e signup.Event, actor Actor) eventResponse {
 	links.add(actor.IsRaidLead, "edit", href, "PATCH")
 	links.add(actor.IsRaidLead, "delete", href, "DELETE")
 	links.add(actor.IsRaidLead, "late-requests", href+"/late-requests", "")
+	// Attaching a report is an edit, but it gets its own rel: a client showing a
+	// "Link the logs" control must not have to infer that edit covers it, and the rel
+	// disappears for a raider exactly as edit does.
+	links.add(actor.IsRaidLead, "set-warcraftlogs", href, "PATCH")
+	// The report itself, once there is one. An external href, because that is where
+	// the resource actually lives.
+	if e.WarcraftLogsURL != nil {
+		links.add(true, "warcraftlogs", *e.WarcraftLogsURL, "")
+	}
 
 	return eventResponse{
 		ID:             e.ID.String(),
@@ -50,6 +62,7 @@ func eventToResponse(e signup.Event, actor Actor) eventResponse {
 		Difficulty:     raidDifficultyToString(e.Difficulty),
 
 		ReminderLeadMinutes: e.ReminderLeadMinutes,
+		WarcraftLogsURL:     e.WarcraftLogsURL,
 		Links:               links,
 	}
 }
@@ -168,7 +181,9 @@ func createEventHandler(events *signup.Events, logger *slog.Logger) http.Handler
 	}
 }
 
-// listGuildEventsHandler returns a guild's upcoming events.
+// listGuildEventsHandler returns a guild's events. ?scope=past returns the ones that
+// have already started, most recent first; anything else defaults to upcoming, which is
+// what this endpoint returned before the parameter existed.
 func listGuildEventsHandler(events *signup.Events, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
@@ -178,9 +193,23 @@ func listGuildEventsHandler(events *signup.Events, logger *slog.Logger) http.Han
 			return
 		}
 
-		list, err := events.ListUpcoming(r.Context(), guildID)
+		scope := r.URL.Query().Get("scope")
+		if scope != "" && scope != "upcoming" && scope != "past" {
+			writeError(w, logger, http.StatusBadRequest, "scope must be upcoming or past")
+			return
+		}
+
+		var (
+			list []signup.Event
+			err  error
+		)
+		if scope == "past" {
+			list, err = events.ListPast(r.Context(), guildID)
+		} else {
+			list, err = events.ListUpcoming(r.Context(), guildID)
+		}
 		if err != nil {
-			logger.ErrorContext(r.Context(), "listing events", "error", err)
+			logger.ErrorContext(r.Context(), "listing events", "error", err, "scope", scope)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
 			return
 		}
@@ -224,6 +253,8 @@ type updateEventRequest struct {
 	ChannelID      *string         `json:"channel_id,omitempty"`
 
 	ReminderLeadMinutes *int32 `json:"reminder_lead_minutes,omitempty"`
+	// WarcraftLogsURL omitted leaves the stored report alone. Sent as "" takes it off.
+	WarcraftLogsURL *string `json:"warcraftlogs_url,omitempty"`
 }
 
 // patchEventHandler applies a partial edit. Raid lead only. Rescheduling on a
@@ -274,6 +305,16 @@ func patchEventHandler(events *signup.Events, logger *slog.Logger) http.HandlerF
 				"reminder_lead_minutes must be between 0 and 1440")
 			return
 		}
+		warcraftLogsURL := body.WarcraftLogsURL
+		if warcraftLogsURL != nil {
+			normalized, err := signup.NormalizeWarcraftLogsURL(*warcraftLogsURL)
+			if err != nil {
+				writeError(w, logger, http.StatusBadRequest,
+					"warcraftlogs_url must be a warcraftlogs.com report link")
+				return
+			}
+			warcraftLogsURL = &normalized
+		}
 
 		event, err := events.Update(r.Context(), signup.UpdateEventInput{
 			ID:             id,
@@ -286,6 +327,7 @@ func patchEventHandler(events *signup.Events, logger *slog.Logger) http.HandlerF
 			ChannelID:      channelID,
 
 			ReminderLeadMinutes: body.ReminderLeadMinutes,
+			WarcraftLogsURL:     warcraftLogsURL,
 		})
 		if err != nil {
 			logger.ErrorContext(r.Context(), "updating event", "error", err)

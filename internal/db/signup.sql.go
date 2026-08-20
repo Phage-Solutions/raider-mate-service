@@ -26,7 +26,7 @@ func (q *Queries) CountCompSlotsForEvent(ctx context.Context, eventID uuid.UUID)
 const createEvent = `-- name: CreateEvent :one
 INSERT INTO events (id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes
+RETURNING id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes, warcraftlogs_url
 `
 
 type CreateEventParams struct {
@@ -73,6 +73,7 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (Event
 		&i.ChannelID,
 		&i.Difficulty,
 		&i.ReminderLeadMinutes,
+		&i.WarcraftlogsUrl,
 	)
 	return i, err
 }
@@ -118,7 +119,7 @@ func (q *Queries) DeleteSignup(ctx context.Context, arg DeleteSignupParams) erro
 }
 
 const getEvent = `-- name: GetEvent :one
-SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes FROM events
+SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes, warcraftlogs_url FROM events
 WHERE id = $1
 `
 
@@ -137,6 +138,7 @@ func (q *Queries) GetEvent(ctx context.Context, id uuid.UUID) (Event, error) {
 		&i.ChannelID,
 		&i.Difficulty,
 		&i.ReminderLeadMinutes,
+		&i.WarcraftlogsUrl,
 	)
 	return i, err
 }
@@ -243,6 +245,48 @@ func (q *Queries) ListLateRequests(ctx context.Context, eventID uuid.UUID) ([]La
 	return items, nil
 }
 
+const listPastEvents = `-- name: ListPastEvents :many
+SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes, warcraftlogs_url FROM events
+WHERE discord_guild_id = $1 AND starts_at < now()
+ORDER BY starts_at DESC
+`
+
+// The complement of ListUpcomingEvents, so every event is in exactly one of the two.
+// Newest first: a raid lead attaching a log is looking for last night, not for the
+// guild's first ever raid.
+func (q *Queries) ListPastEvents(ctx context.Context, discordGuildID int64) ([]Event, error) {
+	rows, err := q.db.Query(ctx, listPastEvents, discordGuildID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Event
+	for rows.Next() {
+		var i Event
+		if err := rows.Scan(
+			&i.ID,
+			&i.DiscordGuildID,
+			&i.Type,
+			&i.Title,
+			&i.StartsAt,
+			&i.SignupDeadline,
+			&i.CompTemplate,
+			&i.MessageID,
+			&i.ChannelID,
+			&i.Difficulty,
+			&i.ReminderLeadMinutes,
+			&i.WarcraftlogsUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSignupsForEvent = `-- name: ListSignupsForEvent :many
 SELECT id, event_id, character_id, status, assigned_role, late_until, note, created_at FROM signups
 WHERE event_id = $1
@@ -324,7 +368,7 @@ func (q *Queries) ListUndecidedForEvent(ctx context.Context, id uuid.UUID) ([]in
 }
 
 const listUpcomingEvents = `-- name: ListUpcomingEvents :many
-SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes FROM events
+SELECT id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes, warcraftlogs_url FROM events
 WHERE discord_guild_id = $1 AND starts_at >= now()
 ORDER BY starts_at ASC
 `
@@ -350,6 +394,7 @@ func (q *Queries) ListUpcomingEvents(ctx context.Context, discordGuildID int64) 
 			&i.ChannelID,
 			&i.Difficulty,
 			&i.ReminderLeadMinutes,
+			&i.WarcraftlogsUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -385,9 +430,17 @@ UPDATE events SET
     difficulty = COALESCE($5, difficulty),
     message_id = COALESCE($6, message_id),
     channel_id = COALESCE($7, channel_id),
-    reminder_lead_minutes = COALESCE($8, reminder_lead_minutes)
-WHERE id = $9
-RETURNING id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes
+    reminder_lead_minutes = COALESCE($8, reminder_lead_minutes),
+    -- The one field a PATCH can also clear. NULL keeps the stored value like every
+    -- other column here, so an empty string is what "take the log off this event"
+    -- looks like on the wire. An empty string is not a URL, so nothing is lost by
+    -- spending it as the sentinel.
+    warcraftlogs_url = CASE
+        WHEN $9::text = '' THEN NULL
+        ELSE COALESCE($9, warcraftlogs_url)
+    END
+WHERE id = $10
+RETURNING id, discord_guild_id, type, title, starts_at, signup_deadline, comp_template, message_id, channel_id, difficulty, reminder_lead_minutes, warcraftlogs_url
 `
 
 type UpdateEventParams struct {
@@ -399,6 +452,7 @@ type UpdateEventParams struct {
 	MessageID           *int64
 	ChannelID           *int64
 	ReminderLeadMinutes *int32
+	WarcraftlogsUrl     *string
 	ID                  uuid.UUID
 }
 
@@ -415,6 +469,7 @@ func (q *Queries) UpdateEvent(ctx context.Context, arg UpdateEventParams) (Event
 		arg.MessageID,
 		arg.ChannelID,
 		arg.ReminderLeadMinutes,
+		arg.WarcraftlogsUrl,
 		arg.ID,
 	)
 	var i Event
@@ -430,6 +485,7 @@ func (q *Queries) UpdateEvent(ctx context.Context, arg UpdateEventParams) (Event
 		&i.ChannelID,
 		&i.Difficulty,
 		&i.ReminderLeadMinutes,
+		&i.WarcraftlogsUrl,
 	)
 	return i, err
 }

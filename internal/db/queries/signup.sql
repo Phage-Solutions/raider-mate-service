@@ -22,7 +22,15 @@ UPDATE events SET
     difficulty = COALESCE(sqlc.narg(difficulty), difficulty),
     message_id = COALESCE(sqlc.narg(message_id), message_id),
     channel_id = COALESCE(sqlc.narg(channel_id), channel_id),
-    reminder_lead_minutes = COALESCE(sqlc.narg(reminder_lead_minutes), reminder_lead_minutes)
+    reminder_lead_minutes = COALESCE(sqlc.narg(reminder_lead_minutes), reminder_lead_minutes),
+    -- The one field a PATCH can also clear. NULL keeps the stored value like every
+    -- other column here, so an empty string is what "take the log off this event"
+    -- looks like on the wire. An empty string is not a URL, so nothing is lost by
+    -- spending it as the sentinel.
+    warcraftlogs_url = CASE
+        WHEN sqlc.narg(warcraftlogs_url)::text = '' THEN NULL
+        ELSE COALESCE(sqlc.narg(warcraftlogs_url), warcraftlogs_url)
+    END
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
@@ -38,6 +46,14 @@ WHERE id = $1;
 SELECT * FROM events
 WHERE discord_guild_id = $1 AND starts_at >= now()
 ORDER BY starts_at ASC;
+
+-- name: ListPastEvents :many
+-- The complement of ListUpcomingEvents, so every event is in exactly one of the two.
+-- Newest first: a raid lead attaching a log is looking for last night, not for the
+-- guild's first ever raid.
+SELECT * FROM events
+WHERE discord_guild_id = $1 AND starts_at < now()
+ORDER BY starts_at DESC;
 
 -- name: UpsertSignup :one
 -- late_until is a plain write-through field, same as note: internal/signup owns the

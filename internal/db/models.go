@@ -601,6 +601,7 @@ type Event struct {
 	ChannelID           *int64
 	Difficulty          *RaidDifficulty
 	ReminderLeadMinutes *int32
+	WarcraftlogsUrl     *string
 }
 
 type GuildChannel struct {
