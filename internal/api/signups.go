@@ -35,15 +35,18 @@ type signupResponse struct {
 // to the character's owner or a raid lead, and to nobody else. The absence of a
 // link is the authorization answer for anyone just looking at the character's own
 // event, not acting on someone else's.
-func signupLinks(eventID, characterID string, canAct bool) Links {
+// signupLinks offers the two writes separately, because they are no longer the same
+// permission: a raid lead may write NO_SHOW on somebody else's signup, and may not take
+// that person's name off the sheet.
+func signupLinks(eventID, characterID string, mayWrite, mayWithdraw bool) Links {
 	href := "/api/events/" + eventID + "/signups/" + characterID
 	links := Links{}
-	links.add(canAct, "self", href, "PUT")
-	links.add(canAct, "withdraw", href, "DELETE")
+	links.add(mayWrite, "self", href, "PUT")
+	links.add(mayWithdraw, "withdraw", href, "DELETE")
 	return links
 }
 
-func signupToResponse(s signup.Signup, canAct, isRaidLead bool) signupResponse {
+func signupToResponse(s signup.Signup, owned, isRaidLead bool) signupResponse {
 	var assignedRole *string
 	if s.AssignedRole != nil {
 		r := string(*s.AssignedRole)
@@ -51,10 +54,8 @@ func signupToResponse(s signup.Signup, canAct, isRaidLead bool) signupResponse {
 	}
 
 	var allowed []string
-	if canAct {
-		for _, status := range signup.AllowedStatuses(isRaidLead) {
-			allowed = append(allowed, string(status))
-		}
+	for _, status := range signup.AllowedStatuses(owned, isRaidLead) {
+		allowed = append(allowed, string(status))
 	}
 
 	return signupResponse{
@@ -65,7 +66,7 @@ func signupToResponse(s signup.Signup, canAct, isRaidLead bool) signupResponse {
 		LateUntil:       s.LateUntil,
 		Note:            s.Note,
 		AllowedStatuses: allowed,
-		Links:           signupLinks(s.EventID.String(), s.CharacterID.String(), canAct),
+		Links:           signupLinks(s.EventID.String(), s.CharacterID.String(), len(allowed) > 0, owned),
 	}
 }
 
@@ -115,17 +116,18 @@ func putSignupHandler(signups *signup.Signups, lateRequests *signup.LateRequests
 			return
 		}
 
-		if !actor.IsRaidLead {
-			owned, err := characters.OwnedByDiscord(r.Context(), characterID, int64(actor.GuildID), int64(actor.DiscordID)) //nolint:gosec
-			if err != nil {
-				logger.ErrorContext(r.Context(), "checking character ownership", "error", err)
-				writeError(w, logger, http.StatusInternalServerError, "internal error")
-				return
-			}
-			if !owned {
-				writeError(w, logger, http.StatusForbidden, "not your character")
-				return
-			}
+		// Asked on every path now, not only a raider's: a raid lead's own signup and a
+		// raid lead's write onto somebody else's are different permissions, and the
+		// difference is exactly this answer.
+		owned, err := characters.OwnedByDiscord(r.Context(), characterID, int64(actor.GuildID), int64(actor.DiscordID)) //nolint:gosec
+		if err != nil {
+			logger.ErrorContext(r.Context(), "checking character ownership", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if !owned && !actor.IsRaidLead {
+			writeError(w, logger, http.StatusForbidden, "not your character")
+			return
 		}
 
 		var body putSignupRequest
@@ -141,25 +143,29 @@ func putSignupHandler(signups *signup.Signups, lateRequests *signup.LateRequests
 
 		written, err := signups.Write(r.Context(), signup.SignupWrite{
 			EventID: eventID, CharacterID: characterID, Status: status, Note: body.Note, LateUntil: body.LateUntil,
-		}, actor.IsRaidLead)
+		}, owned, actor.IsRaidLead)
 
 		switch {
 		case errors.Is(err, signup.ErrSignupsClosed):
 			fileLateRequest(w, r, lateRequests, logger, eventID, characterID, status, body.Note, body.LateUntil, actor.IsRaidLead)
 		case errors.Is(err, signup.ErrStatusRequiresRaidLead):
 			writeError(w, logger, http.StatusForbidden, "status requires raid lead")
+		case errors.Is(err, signup.ErrSignupNotYours):
+			writeError(w, logger, http.StatusForbidden, "only the raider may set that status")
 		case err != nil:
 			logger.ErrorContext(r.Context(), "writing signup", "error", err)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
 		default:
-			writeJSON(w, logger, http.StatusOK, signupToResponse(written, true, actor.IsRaidLead))
+			writeJSON(w, logger, http.StatusOK, signupToResponse(written, owned, actor.IsRaidLead))
 		}
 	}
 }
 
-// deleteSignupHandler withdraws a signup, self or raid lead. Past the deadline this
-// closes for players the same way a new signup would: the withdrawal becomes a
-// late request carrying DECLINED, not a silent delete.
+// deleteSignupHandler withdraws a signup. The owner alone, raid lead included: taking
+// somebody's name off the sheet is rewriting their answer, and only they may do that.
+//
+// Past the deadline this closes for players the same way a new signup would: the
+// withdrawal becomes a late request carrying DECLINED, not a silent delete.
 func deleteSignupHandler(signups *signup.Signups, lateRequests *signup.LateRequests, characters *roster.Characters, events eventLookup, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := actorFromContext(r.Context())
@@ -193,17 +199,15 @@ func deleteSignupHandler(signups *signup.Signups, lateRequests *signup.LateReque
 			return
 		}
 
-		if !actor.IsRaidLead {
-			owned, err := characters.OwnedByDiscord(r.Context(), characterID, int64(actor.GuildID), int64(actor.DiscordID)) //nolint:gosec
-			if err != nil {
-				logger.ErrorContext(r.Context(), "checking character ownership", "error", err)
-				writeError(w, logger, http.StatusInternalServerError, "internal error")
-				return
-			}
-			if !owned {
-				writeError(w, logger, http.StatusForbidden, "not your character")
-				return
-			}
+		owned, err := characters.OwnedByDiscord(r.Context(), characterID, int64(actor.GuildID), int64(actor.DiscordID)) //nolint:gosec
+		if err != nil {
+			logger.ErrorContext(r.Context(), "checking character ownership", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if !owned {
+			writeError(w, logger, http.StatusForbidden, "not your character")
+			return
 		}
 
 		err = signups.Withdraw(r.Context(), eventID, characterID, actor.IsRaidLead)
@@ -260,17 +264,18 @@ func listSignupsHandler(signups *signup.Signups, characters *roster.Characters, 
 			return
 		}
 
+		// Asked for a raid lead too. This used to be skipped for them, which was fine
+		// while they could act on every signup regardless; now their own row is the one
+		// place they get the self-reported statuses, so ownership has to be known.
 		owned := map[uuid.UUID]bool{}
-		if !actor.IsRaidLead {
-			mine, err := characters.ListForUser(r.Context(), int64(actor.DiscordID), int64(actor.GuildID)) //nolint:gosec
-			if err != nil {
-				logger.ErrorContext(r.Context(), "listing actor characters", "error", err)
-				writeError(w, logger, http.StatusInternalServerError, "internal error")
-				return
-			}
-			for _, c := range mine {
-				owned[c.ID] = true
-			}
+		mine, err := characters.ListForUser(r.Context(), int64(actor.DiscordID), int64(actor.GuildID)) //nolint:gosec
+		if err != nil {
+			logger.ErrorContext(r.Context(), "listing actor characters", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+			return
+		}
+		for _, c := range mine {
+			owned[c.ID] = true
 		}
 
 		byID, err := guildRoster(r.Context(), characters, int64(actor.GuildID)) //nolint:gosec
@@ -282,7 +287,7 @@ func listSignupsHandler(signups *signup.Signups, characters *roster.Characters, 
 
 		out := make([]signupResponse, len(list))
 		for i, s := range list {
-			out[i] = signupToResponse(s, actor.IsRaidLead || owned[s.CharacterID], actor.IsRaidLead)
+			out[i] = signupToResponse(s, owned[s.CharacterID], actor.IsRaidLead)
 			out[i].Character = lookupCharacter(byID, s.CharacterID)
 		}
 		writeJSON(w, logger, http.StatusOK, out)

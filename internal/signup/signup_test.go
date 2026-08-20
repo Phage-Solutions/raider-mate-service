@@ -119,7 +119,7 @@ func TestWritePassesBeforeTheDeadlineForAPlayer(t *testing.T) {
 	store := newFakeSignupStore()
 	store.event = Event{SignupDeadline: now.Add(time.Hour)}
 
-	_, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{Status: db.SignupStatusCONFIRMED}, false)
+	_, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{Status: db.SignupStatusCONFIRMED}, true, false)
 	if err != nil {
 		t.Fatalf("Write before deadline: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestWriteRejectsAPlayerPastTheDeadline(t *testing.T) {
 	store := newFakeSignupStore()
 	store.event = Event{SignupDeadline: now.Add(-time.Hour)}
 
-	_, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{Status: db.SignupStatusCONFIRMED}, false)
+	_, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{Status: db.SignupStatusCONFIRMED}, true, false)
 	if !errors.Is(err, ErrSignupsClosed) {
 		t.Fatalf("err = %v, want ErrSignupsClosed", err)
 	}
@@ -147,7 +147,7 @@ func TestWritePassesForARaidLeadPastTheDeadline(t *testing.T) {
 	store := newFakeSignupStore()
 	store.event = Event{SignupDeadline: now.Add(-time.Hour)}
 
-	_, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{Status: db.SignupStatusCONFIRMED}, true)
+	_, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{Status: db.SignupStatusCONFIRMED}, true, true)
 	if err != nil {
 		t.Fatalf("Write past deadline as raid lead: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestWriteAcceptsLateAndAbsentPastTheDeadline(t *testing.T) {
 			store := newFakeSignupStore()
 			store.event = Event{SignupDeadline: now.Add(-time.Hour), StartsAt: now.Add(time.Hour)}
 
-			_, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{Status: status}, false)
+			_, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{Status: status}, true, false)
 			if err != nil {
 				t.Fatalf("Write %s past deadline: %v", status, err)
 			}
@@ -183,7 +183,7 @@ func TestWriteRejectsLateOnceTheRaidHasStarted(t *testing.T) {
 
 	lateUntil := now.Add(time.Hour)
 	_, err := NewSignups(store, newTestLogger()).Write(context.Background(),
-		SignupWrite{Status: db.SignupStatusLATE, LateUntil: &lateUntil}, false)
+		SignupWrite{Status: db.SignupStatusLATE, LateUntil: &lateUntil}, true, false)
 	if !errors.Is(err, ErrSignupsClosed) {
 		t.Fatalf("err = %v, want ErrSignupsClosed", err)
 	}
@@ -192,36 +192,53 @@ func TestWriteRejectsLateOnceTheRaidHasStarted(t *testing.T) {
 	}
 }
 
-// TestWriteStatusAuthority walks every status for both callers. ABSENT is a planned
-// absence the raider declares, so it belongs to them; NO_SHOW is the raid lead's
-// judgement about the night and is the only value they hold alone.
+// TestWriteStatusAuthority walks every status against who is writing and whose signup
+// it is.
+//
+// A signup is the raider's own answer. On their own character everyone writes the
+// self-reported set and nobody writes NO_SHOW. On somebody else's, a raid lead writes
+// NO_SHOW and nothing else, because that records what happened on the night rather than
+// rewriting what that person said they would do.
 func TestWriteStatusAuthority(t *testing.T) {
 	tests := []struct {
 		status     db.SignupStatus
+		owned      bool
 		isRaidLead bool
 		wantErr    error
 	}{
-		{db.SignupStatusCONFIRMED, false, nil},
-		{db.SignupStatusTENTATIVE, false, nil},
-		{db.SignupStatusDECLINED, false, nil},
-		{db.SignupStatusLATE, false, nil},
-		{db.SignupStatusABSENT, false, nil},
-		{db.SignupStatusNOSHOW, false, ErrStatusRequiresRaidLead},
-		{db.SignupStatusABSENT, true, nil},
-		{db.SignupStatusNOSHOW, true, nil},
+		{db.SignupStatusCONFIRMED, true, false, nil},
+		{db.SignupStatusTENTATIVE, true, false, nil},
+		{db.SignupStatusDECLINED, true, false, nil},
+		{db.SignupStatusLATE, true, false, nil},
+		{db.SignupStatusABSENT, true, false, nil},
+		{db.SignupStatusNOSHOW, true, false, ErrStatusRequiresRaidLead},
+
+		{db.SignupStatusABSENT, true, true, nil},
+		{db.SignupStatusNOSHOW, true, true, ErrStatusRequiresRaidLead},
+
+		// The whole point: a raid lead cannot answer for somebody else.
+		{db.SignupStatusCONFIRMED, false, true, ErrSignupNotYours},
+		{db.SignupStatusDECLINED, false, true, ErrSignupNotYours},
+		{db.SignupStatusABSENT, false, true, ErrSignupNotYours},
+		{db.SignupStatusNOSHOW, false, true, nil},
 	}
 
 	for _, tt := range tests {
-		name := string(tt.status) + "/player"
+		who := "player"
 		if tt.isRaidLead {
-			name = string(tt.status) + "/raid lead"
+			who = "raid lead"
 		}
+		whose := "own"
+		if !tt.owned {
+			whose = "another's"
+		}
+		name := string(tt.status) + "/" + who + "/" + whose
 		t.Run(name, func(t *testing.T) {
 			store := newFakeSignupStore()
 			store.event = Event{SignupDeadline: time.Now().Add(time.Hour)}
 
 			_, err := NewSignups(store, newTestLogger()).Write(
-				context.Background(), SignupWrite{Status: tt.status}, tt.isRaidLead)
+				context.Background(), SignupWrite{Status: tt.status}, tt.owned, tt.isRaidLead)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
@@ -245,7 +262,7 @@ func TestWriteNotifiesWhenTheWriteEmptiesALockedComp(t *testing.T) {
 
 	if _, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{
 		Status: db.SignupStatusABSENT,
-	}, false); err != nil {
+	}, true, false); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -269,7 +286,7 @@ func TestWriteFailsWhenTheDroppedSlotNotificationCannotBeQueued(t *testing.T) {
 
 	_, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{
 		Status: db.SignupStatusABSENT,
-	}, false)
+	}, true, false)
 	if !errors.Is(err, store.notifyErr) {
 		t.Fatalf("err = %v, want the notification failure surfaced", err)
 	}
@@ -282,7 +299,7 @@ func TestWriteNotifiesNobodyWhenNoCompSlotWasHeld(t *testing.T) {
 
 	if _, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{
 		Status: db.SignupStatusDECLINED,
-	}, false); err != nil {
+	}, true, false); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -298,7 +315,7 @@ func TestWriteClearsLateUntilWhenStatusIsNotLate(t *testing.T) {
 
 	_, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{
 		Status: db.SignupStatusCONFIRMED, LateUntil: &lateUntil,
-	}, false)
+	}, true, false)
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -314,7 +331,7 @@ func TestWriteKeepsLateUntilWhenStatusIsLate(t *testing.T) {
 
 	_, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{
 		Status: db.SignupStatusLATE, LateUntil: &lateUntil,
-	}, false)
+	}, true, false)
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -399,7 +416,7 @@ func TestWriteAsksForARedrawOfTheEventMessage(t *testing.T) {
 
 	if _, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{
 		Status: db.SignupStatusCONFIRMED,
-	}, false); err != nil {
+	}, true, false); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -444,7 +461,7 @@ func TestWriteAsksForNoRedrawWhenThereIsNoMessageToEdit(t *testing.T) {
 
 	if _, err := NewSignups(store, newTestLogger()).Write(context.Background(), SignupWrite{
 		Status: db.SignupStatusCONFIRMED,
-	}, false); err != nil {
+	}, true, false); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 

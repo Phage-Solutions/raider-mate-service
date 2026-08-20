@@ -12,6 +12,22 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-20
+
+### Changed
+
+- **A signup is the raider's own answer, and a raid lead can no longer rewrite it.** On
+  somebody else's character a raid lead may write `NO_SHOW` and nothing else, and may
+  not withdraw the signup at all. `allowed_statuses` and the `self` and `withdraw` links
+  now say so, so a client renders exactly what is available.
+
+  A raid lead who could flip a raider to `DECLINED`, or take their name off the sheet,
+  could quietly decide who was never asking to come, with nothing on the record. Who
+  actually plays is decided by the comp, which is the raid lead's to build and is
+  visible and re-lockable. This is a behaviour change: a guild used to a raid lead
+  tidying up other people's answers has to ask the raider to change it, or settle it in
+  the comp.
+
 ## [0.6.2] - 2026-08-20
 
 ### Added

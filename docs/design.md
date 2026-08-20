@@ -255,6 +255,17 @@ the raider knows which one it is, so `ABSENT` is theirs to write. `NO_SHOW` is t
 a raid lead holds alone: it is a judgement about what happened on the night, not
 something anyone reports about themselves.
 
+**A signup is the raider's own answer and nobody else may rewrite it.** On a character
+that is not theirs, a raid lead may write `NO_SHOW` and nothing else, and may not
+withdraw the signup at all. The self-reported statuses stay the owner's, raid lead or
+not.
+
+This is deliberate and it is not about trust in the abstract: a raid lead who can flip
+somebody to `DECLINED`, or take their name off the sheet, can quietly decide who was
+never asking to come, and the raider has no record that it happened. Deciding who
+actually plays is a separate act with a separate home, the comp, where it is visible
+and re-lockable. The signup sheet stays a record of what people said.
+
 > `BENCH` is gone as of the step 3 assigner and is not in the enum. Bench membership
 > lives on `comp_slots.is_bench` instead, decided fresh by every lock;
 > `signups.status` keeps whatever the raider self-reported (usually `CONFIRMED`) so

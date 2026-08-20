@@ -28,13 +28,22 @@ var selfReported = []db.SignupStatus{
 	db.SignupStatusLATE, db.SignupStatusABSENT,
 }
 
-// AllowedStatuses returns the statuses this caller may write. Write enforces the same
-// list, so the API cannot advertise a status the write path then refuses.
-func AllowedStatuses(isRaidLead bool) []db.SignupStatus {
-	if isRaidLead {
-		return AllStatuses()
+// AllowedStatuses returns the statuses this caller may write on this signup. Write
+// enforces the same list, so the API cannot advertise a status the write path refuses.
+//
+// A signup is the raider's own answer and it stays theirs. A raid lead is offered
+// nothing on somebody else's but NO_SHOW, which records what happened on the night
+// rather than rewriting what that person said they would do. Who actually plays is
+// decided by the comp, which is the raid lead's to build; changing a raider's stated
+// answer is not the same act and must not be available to anyone but them.
+func AllowedStatuses(owned, isRaidLead bool) []db.SignupStatus {
+	if owned {
+		return slices.Clone(selfReported)
 	}
-	return slices.Clone(selfReported)
+	if isRaidLead {
+		return []db.SignupStatus{db.SignupStatusNOSHOW}
+	}
+	return nil
 }
 
 // AllStatuses is every value of the enum, for input validation.
@@ -52,6 +61,10 @@ var ErrSignupsClosed = errors.New("signups closed")
 // makes it raid-lead-controlled regardless of who owns the character or where the
 // deadline stands.
 var ErrStatusRequiresRaidLead = errors.New("status requires raid lead")
+
+// ErrSignupNotYours means a raid lead tried to write somebody else's answer. NO_SHOW is
+// the only one of those that is theirs to write.
+var ErrSignupNotYours = errors.New("only the raider may set that status")
 
 // Signup is a character's response to an event, translated out of pgtype into plain
 // Go types.
@@ -102,12 +115,17 @@ func NewSignups(store signupStore, logger *slog.Logger) *Signups {
 	return &Signups{store: store, logger: logger}
 }
 
-// Write creates or updates a signup. isRaidLead governs two independent checks: the
-// deadline gate (a raid lead can always write) and status authority (NO_SHOW is
-// raid-lead-only regardless of the deadline).
-func (s *Signups) Write(ctx context.Context, in SignupWrite, isRaidLead bool) (Signup, error) {
-	if !slices.Contains(AllowedStatuses(isRaidLead), in.Status) {
-		return Signup{}, ErrStatusRequiresRaidLead
+// Write creates or updates a signup. owned says the caller owns the character;
+// isRaidLead governs the deadline gate (a raid lead can always write) and, on a
+// character that is not theirs, limits them to NO_SHOW.
+func (s *Signups) Write(ctx context.Context, in SignupWrite, owned, isRaidLead bool) (Signup, error) {
+	if !slices.Contains(AllowedStatuses(owned, isRaidLead), in.Status) {
+		// Two different refusals: a raider reaching for the raid lead's status, and a
+		// raid lead reaching into somebody else's answer.
+		if owned {
+			return Signup{}, ErrStatusRequiresRaidLead
+		}
+		return Signup{}, ErrSignupNotYours
 	}
 
 	event, err := s.store.GetEvent(ctx, in.EventID)
@@ -143,9 +161,13 @@ func (s *Signups) Write(ctx context.Context, in SignupWrite, isRaidLead bool) (S
 	return signup, nil
 }
 
-// Withdraw deletes a signup. Past the deadline this closes for players the same way a
-// new signup would: the gate treats "I can no longer come" as a write like any other,
-// so a late withdrawal is a late request carrying DECLINED, not a silent delete.
+// Withdraw deletes a signup. Taking a name off the sheet is the raider's own act, so
+// the caller has to own the character; the handler refuses anyone else, raid lead
+// included.
+//
+// Past the deadline this closes for players the same way a new signup would: the gate
+// treats "I can no longer come" as a write like any other, so a late withdrawal is a
+// late request carrying DECLINED, not a silent delete.
 //
 // Taking a name off the sheet gives up a seat the same as a status change does, so it
 // drops comp slots and tells the raid lead on the same terms.
