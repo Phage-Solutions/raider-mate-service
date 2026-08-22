@@ -12,6 +12,48 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type BillingPeriodEnum string
+
+const (
+	BillingPeriodEnumMONTHLY BillingPeriodEnum = "MONTHLY"
+	BillingPeriodEnumYEARLY  BillingPeriodEnum = "YEARLY"
+)
+
+func (e *BillingPeriodEnum) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = BillingPeriodEnum(s)
+	case string:
+		*e = BillingPeriodEnum(s)
+	default:
+		return fmt.Errorf("unsupported scan type for BillingPeriodEnum: %T", src)
+	}
+	return nil
+}
+
+type NullBillingPeriodEnum struct {
+	BillingPeriodEnum BillingPeriodEnum
+	Valid             bool // Valid is true if BillingPeriodEnum is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullBillingPeriodEnum) Scan(value interface{}) error {
+	if value == nil {
+		ns.BillingPeriodEnum, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.BillingPeriodEnum.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullBillingPeriodEnum) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.BillingPeriodEnum), nil
+}
+
 type CompMode string
 
 const (
@@ -545,6 +587,92 @@ func (ns NullSignupStatus) Value() (driver.Value, error) {
 	return string(ns.SignupStatus), nil
 }
 
+type SubStatusEnum string
+
+const (
+	SubStatusEnumACTIVE   SubStatusEnum = "ACTIVE"
+	SubStatusEnumPASTDUE  SubStatusEnum = "PAST_DUE"
+	SubStatusEnumCANCELED SubStatusEnum = "CANCELED"
+	SubStatusEnumTRIALING SubStatusEnum = "TRIALING"
+)
+
+func (e *SubStatusEnum) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SubStatusEnum(s)
+	case string:
+		*e = SubStatusEnum(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SubStatusEnum: %T", src)
+	}
+	return nil
+}
+
+type NullSubStatusEnum struct {
+	SubStatusEnum SubStatusEnum
+	Valid         bool // Valid is true if SubStatusEnum is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSubStatusEnum) Scan(value interface{}) error {
+	if value == nil {
+		ns.SubStatusEnum, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SubStatusEnum.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSubStatusEnum) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SubStatusEnum), nil
+}
+
+type TierEnum string
+
+const (
+	TierEnumFREE    TierEnum = "FREE"
+	TierEnumPREMIUM TierEnum = "PREMIUM"
+)
+
+func (e *TierEnum) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TierEnum(s)
+	case string:
+		*e = TierEnum(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TierEnum: %T", src)
+	}
+	return nil
+}
+
+type NullTierEnum struct {
+	TierEnum TierEnum
+	Valid    bool // Valid is true if TierEnum is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTierEnum) Scan(value interface{}) error {
+	if value == nil {
+		ns.TierEnum, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TierEnum.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTierEnum) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TierEnum), nil
+}
+
 type Character struct {
 	ID              uuid.UUID
 	UserID          uuid.UUID
@@ -685,6 +813,18 @@ type Signup struct {
 	LateUntil    pgtype.Timestamptz
 	Note         *string
 	CreatedAt    pgtype.Timestamptz
+}
+
+type Subscription struct {
+	ID               uuid.UUID
+	DiscordGuildID   int64
+	Tier             TierEnum
+	BillingPeriod    *BillingPeriodEnum
+	ProviderSubID    *string
+	Status           SubStatusEnum
+	PriceLockedAt    pgtype.Numeric
+	CurrentPeriodEnd pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
 }
 
 type User struct {

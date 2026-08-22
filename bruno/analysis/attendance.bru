@@ -1,0 +1,16 @@
+meta {
+  name: attendance
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/analysis/attendance
+  body: none
+  auth: none
+}
+
+docs {
+  Free for every guild. Raw per-raider counts against the number of events that
+  actually ran in the last ninety days, with DECLINED and NO_SHOW kept apart.
+}

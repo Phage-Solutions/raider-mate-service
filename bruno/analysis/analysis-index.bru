@@ -1,0 +1,17 @@
+meta {
+  name: analysis index
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/analysis
+  body: none
+  auth: none
+}
+
+docs {
+  Links and nothing else. A free guild is handed self and attendance; a Premium
+  guild is handed all five panels. The link set is the tier, so a client renders a
+  locked state for whatever it was not given.
+}

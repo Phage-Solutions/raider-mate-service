@@ -6,6 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Phage-Solutions/raider-mate-service/internal/audit"
+	"github.com/Phage-Solutions/raider-mate-service/internal/billing"
 	"github.com/Phage-Solutions/raider-mate-service/internal/comp"
 	"github.com/Phage-Solutions/raider-mate-service/internal/roster"
 	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
@@ -20,6 +22,11 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *s
 
 	rosterStore := roster.NewStore(pool)
 	characters := roster.NewCharacters(rosterStore)
+
+	// Tier is read by the analysis endpoints alone today. It is wired here rather than
+	// inside audit so there is one Tiers for whatever else comes to need one.
+	tiers := billing.NewTiers(billing.NewStore(pool))
+	analysis := audit.NewAnalysis(audit.NewStore(pool), tiers)
 
 	compStore := comp.NewStore(pool)
 	locker := comp.NewLocker(compStore)
@@ -39,6 +46,17 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *s
 
 	apiMux.HandleFunc("GET /api/guilds/{gid}/capabilities", getGuildCapabilitiesHandler(logger))
 
+	// Analysis is the guild's own history read back to it, so it is open to anyone in
+	// the guild, like the roster and the event list. What a guild may read is the
+	// index's link set; the panels themselves answer 402 to a caller who went straight
+	// there without one.
+	apiMux.HandleFunc("GET /api/guilds/{gid}/analysis", getAnalysisIndexHandler(analysis, logger))
+	apiMux.HandleFunc("GET /api/guilds/{gid}/analysis/attendance", getAttendanceHandler(analysis, logger))
+	apiMux.HandleFunc("GET /api/guilds/{gid}/analysis/comp-balance", getCompBalanceHandler(analysis, logger))
+	apiMux.HandleFunc("GET /api/guilds/{gid}/analysis/roster-health", getRosterHealthHandler(analysis, logger))
+	apiMux.HandleFunc("GET /api/guilds/{gid}/analysis/throughput", getThroughputHandler(analysis, logger))
+	apiMux.HandleFunc("GET /api/guilds/{gid}/analysis/ilvl", getIlvlSeriesHandler(analysis, logger))
+
 	apiMux.HandleFunc("GET /api/guilds/{gid}/raid-lead-roles", listRaidLeadRolesHandler(raidLeads, logger))
 	apiMux.HandleFunc("PUT /api/guilds/{gid}/raid-lead-roles", putRaidLeadRolesHandler(raidLeads, logger))
 
@@ -51,7 +69,6 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *s
 	apiMux.HandleFunc("POST /api/guilds/{gid}/characters", createCharacterHandler(characters, logger))
 	apiMux.HandleFunc("GET /api/guilds/{gid}/characters", listGuildCharactersHandler(characters, logger))
 	apiMux.HandleFunc("GET /api/users/{did}/characters", listUserCharactersHandler(characters, logger))
-	apiMux.HandleFunc("GET /api/users/{did}/guilds", listUserGuildsHandler(characters, logger))
 	apiMux.HandleFunc("PATCH /api/characters/{cid}", patchCharacterHandler(characters, logger))
 	apiMux.HandleFunc("DELETE /api/characters/{cid}", deleteCharacterHandler(characters, logger))
 	apiMux.HandleFunc("GET /api/characters/{cid}/roles", getCharacterRolesHandler(characters, logger))
@@ -98,6 +115,12 @@ func NewRouter(pool *pgxpool.Pool, apiKey string, queued queueWatcher, logger *s
 		requireServiceKey(putGuildChannelsHandler(catalog, logger), apiKey, logger))
 	mux.Handle("PUT /api/guilds/{gid}/discord-roles",
 		requireServiceKey(putGuildRolesHandler(catalog, logger), apiKey, logger))
+
+	// Asked before a guild is chosen, so it cannot go through requireAuth: there is no
+	// guild id to put in the headers yet. More specific than the "/api/" prefix above,
+	// which is what routes it here instead.
+	mux.Handle("GET /api/users/{did}/guilds",
+		requireGuildlessAuth(listUserGuildsHandler(characters, logger), apiKey, logger))
 
 	// The bot telling the service where it posted an event it was asked to announce.
 	// Service key alone for the same reason as the catalog pushes above: a poller has

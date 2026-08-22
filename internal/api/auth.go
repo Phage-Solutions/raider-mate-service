@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -45,6 +46,34 @@ func requireAuth(next http.Handler, apiKey string, roles raidLeadRoleLister, log
 		actor.IsRaidLead = resolveIsRaidLead(actor, int64sToUint64s(raidLeadRoleIDs))
 
 		next.ServeHTTP(w, r.WithContext(withActor(r.Context(), actor)))
+	})
+}
+
+// requireGuildlessAuth is requireAuth for the one route that is asked before a guild
+// has been chosen: GET /api/users/{did}/guilds, which exists precisely to find out
+// which guild to work in. requireAuth cannot serve it, because it insists on a real
+// guild snowflake and 0 is not one, so every caller of that route was answered 400
+// before its handler ever ran.
+//
+// The actor it puts on the context carries the Discord ID and nothing else: no guild,
+// no roles, and IsRaidLead false. That is not a downgrade to work around, it is the
+// truth at this point in the flow, and it is why nothing behind this middleware may
+// read anything guild-scoped. The handler's own check that {did} is the caller is the
+// whole authorization story here.
+func requireGuildlessAuth(next http.Handler, apiKey string, logger *slog.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !validAPIKey(r.Header.Get("Authorization"), apiKey) {
+			writeError(w, logger, http.StatusUnauthorized, "invalid or missing API key")
+			return
+		}
+
+		discordID, err := parseSnowflake(r.Header.Get("X-Actor-Discord-Id"))
+		if err != nil {
+			writeError(w, logger, http.StatusBadRequest, fmt.Sprintf("X-Actor-Discord-Id: %v", err))
+			return
+		}
+
+		next.ServeHTTP(w, r.WithContext(withActor(r.Context(), Actor{DiscordID: discordID})))
 	})
 }
 

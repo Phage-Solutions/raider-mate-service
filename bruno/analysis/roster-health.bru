@@ -1,0 +1,16 @@
+meta {
+  name: roster health
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/analysis/roster-health
+  body: none
+  auth: none
+}
+
+docs {
+  Premium. Roster size, per-role coverage from the character role menus, and how
+  much of the roster still turns up. 402 for a free guild.
+}

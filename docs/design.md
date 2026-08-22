@@ -585,8 +585,9 @@ and helping strangers with their Postgres.
 
 ## 10. Open questions
 
-1. **Attendance free/Premium boundary** needs a one-sentence definition users can read
-   without filing a support ticket.
+1. ~~**Attendance free/Premium boundary**~~ settled: attendance is free, and anything
+   computed across events is Premium. In the product's own words, "you can always see
+   who turned up; Premium is what that adds up to."
 2. **Raider.IO ToS**: largely defused by keeping the integration free-tier, but
    Premium features are *derived* from their data. Worth a five-minute read before
    Premium ships.

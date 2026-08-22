@@ -184,3 +184,68 @@ func TestValidAPIKeyRequiresTheBearerPrefix(t *testing.T) {
 		t.Errorf("validAPIKey with the Bearer prefix = false, want true")
 	}
 }
+
+// The guild picker asks who you are before it knows where you are, so this middleware
+// has to accept a request carrying no guild id at all. requireAuth answered it 400,
+// which is what made the picker show every caller an unsorted list of their servers.
+func TestRequireGuildlessAuthAcceptsACallerWithNoGuildYet(t *testing.T) {
+	var gotActor Actor
+	var gotOK bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotActor, gotOK = actorFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	r := httptest.NewRequest(http.MethodGet, "/api/users/1/guilds", nil)
+	r.Header.Set("Authorization", "Bearer secret-key")
+	r.Header.Set("X-Actor-Discord-Id", "1")
+
+	w := httptest.NewRecorder()
+	requireGuildlessAuth(next, "secret-key", testLogger()).ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: body %s", w.Code, w.Body.String())
+	}
+	if !gotOK {
+		t.Fatalf("actor not found on context")
+	}
+	if gotActor.DiscordID != 1 {
+		t.Errorf("discord_id = %d, want 1", gotActor.DiscordID)
+	}
+	if gotActor.GuildID != 0 || gotActor.IsRaidLead || gotActor.IsGuildAdmin {
+		t.Errorf("actor = %+v, want the discord id and nothing else", gotActor)
+	}
+}
+
+func TestRequireGuildlessAuthStillNeedsToKnowWhoIsAsking(t *testing.T) {
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatalf("next handler called, want the request rejected before it")
+	})
+
+	r := httptest.NewRequest(http.MethodGet, "/api/users/1/guilds", nil)
+	r.Header.Set("Authorization", "Bearer secret-key")
+
+	w := httptest.NewRecorder()
+	requireGuildlessAuth(next, "secret-key", testLogger()).ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestRequireGuildlessAuthRejectsAWrongKey(t *testing.T) {
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatalf("next handler called, want the request rejected before it")
+	})
+
+	r := httptest.NewRequest(http.MethodGet, "/api/users/1/guilds", nil)
+	r.Header.Set("Authorization", "Bearer wrong-key")
+	r.Header.Set("X-Actor-Discord-Id", "1")
+
+	w := httptest.NewRecorder()
+	requireGuildlessAuth(next, "secret-key", testLogger()).ServeHTTP(w, r)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}

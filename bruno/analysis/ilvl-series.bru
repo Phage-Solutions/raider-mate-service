@@ -1,0 +1,16 @@
+meta {
+  name: ilvl series
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/analysis/ilvl
+  body: none
+  auth: none
+}
+
+docs {
+  Premium. Weekly gear curve from character_snapshots, one snapshot per character
+  per week so a busy raider does not outweigh a quiet one. 402 for a free guild.
+}

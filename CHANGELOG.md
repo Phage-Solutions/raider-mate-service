@@ -12,6 +12,53 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-22
+
+### Added
+
+- **Analysis endpoints, and the tier that gates them.** `GET
+  /api/guilds/{gid}/analysis` returns links and nothing else, and the link set is what
+  the guild may read: `attendance` for everyone, plus `comp-balance`, `roster-health`,
+  `throughput` and `ilvl` for a guild on Premium. Every panel covers the same fixed
+  ninety-day window, and every rate arrives computed so two clients cannot divide the
+  same two numbers differently. Readable by any member of the guild: this is the
+  guild's own history read back to it, not a raid lead's private view.
+- **Where the Premium boundary falls.** Attendance is free. Anything computed across
+  events is Premium. This settles the open question the design doc had been carrying,
+  and the dashboard is built against it.
+- **`subscriptions`.** One row per guild, holding tier, provider status and the paid
+  period. A guild with no row is FREE, so nothing needs writing when a bot is added and
+  nothing needed backfilling. There is still no billing integration and no route that
+  writes this table: rows are set by hand until there is one. A subscription that
+  lapses, is cancelled or runs past its paid period reads as FREE, and nothing that was
+  captured for it is deleted or stops being captured.
+- **The raid week counts people, not signup rows.** `analysis/throughput` reports how
+  many raiders confirmed, declined or failed to appear in a week, counted once each. It
+  summed every raid's signups instead, so a guild raiding three nights with twelve people
+  read as thirty-six confirmed: more people than the guild has, and more than the roster
+  panel beside it reports. The response also carries the window's total raid count, so a
+  client can say whether a week's bar covers one raid night or three.
+- **The gear curve is drawn over mains, in quartiles.** `analysis/ilvl` reports `p25`,
+  `median` and `p75` per week instead of the lowest and highest item level, and counts
+  only characters marked as a main. A roster holds abandoned alts, and one of them set
+  the floor at whatever it was when it was abandoned: a band from lowest to highest
+  spanned two hundred item levels of nothing and pushed the median against the top of
+  its own chart. The distance between the quartiles is the gear gap, and one returning
+  raider cannot move it.
+- **A gated panel answers 402, not 403.** Nobody in a free guild may read one, and the
+  fix is a subscription rather than a role, so a client can tell an upsell apart from
+  an apology.
+
+### Fixed
+
+- **`GET /api/users/{did}/guilds` answered 400 to every caller.** The route exists to be
+  asked before a guild has been chosen, but it sat behind the same middleware as every
+  guild-scoped route, which requires a real guild snowflake in `X-Actor-Guild-Id` and
+  rejects the `0` a caller has to send when it does not have one yet. It now takes the
+  API key and `X-Actor-Discord-Id` alone; the guild id and roles headers are ignored
+  there. Clients need no change. This is what left the dashboard's guild picker unable to
+  tell which of a raider's Discord servers run Raider Mate.
+
 ## [0.9.0] - 2026-08-22
 
 ### Fixed

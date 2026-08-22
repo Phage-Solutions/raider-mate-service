@@ -1,0 +1,16 @@
+meta {
+  name: throughput
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/guilds/{{guildId}}/analysis/throughput
+  body: none
+  auth: none
+}
+
+docs {
+  Premium. The raid week, weekly: events run, answers given, bench rate, no-show
+  rate. Weeks with no raids are absent rather than zero. 402 for a free guild.
+}
