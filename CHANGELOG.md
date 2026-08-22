@@ -12,6 +12,30 @@ Sections are `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-22
+
+### Fixed
+
+- **An edited event never reached Discord.** Moving a raid an hour later, fixing a typo
+  in the title, switching a night from Heroic to Mythic, or attaching a WarcraftLogs
+  report all wrote the event and queued nothing, so the signup sheet in the channel went
+  on showing the old one until some unrelated signup or comp write happened to redraw it.
+  Raiders read the message, not the database.
+
+  `PATCH /api/events/{id}` now queues a redraw in the same transaction as the edit, so an
+  edit that rolls back cannot leave one queued. This needs no bot change: the bot already
+  rebuilds the card for any `MESSAGE`-target notification before it looks at the kind.
+
+  The new `EVENT_CHANGED` kind keeps the outbox honest about what happened rather than
+  being dispatched on. An event the bot has not posted yet queues nothing, and so does
+  the bot recording the message id of a sheet it has only just put up, which would
+  otherwise have it immediately re-edit its own post.
+
+- **A bad `difficulty` on an event edit answered 500.** `PATCH /api/events/{id}` cast the
+  value straight to the enum where create parses it, so anything that was not `NORMAL`,
+  `HEROIC` or `MYTHIC` reached Postgres and came back as an internal error. It answers
+  `400` with the same message create does.
+
 ## [0.8.0] - 2026-08-20
 
 ### Added

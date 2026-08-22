@@ -244,6 +244,7 @@ const (
 	NotificationKindEVENTCREATED     NotificationKind = "EVENT_CREATED"
 	NotificationKindSIGNUPCHANGED    NotificationKind = "SIGNUP_CHANGED"
 	NotificationKindCOMPCHANGED      NotificationKind = "COMP_CHANGED"
+	NotificationKindEVENTCHANGED     NotificationKind = "EVENT_CHANGED"
 )
 
 func (e *NotificationKind) Scan(src interface{}) error {

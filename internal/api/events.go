@@ -309,7 +309,11 @@ func patchEventHandler(events *signup.Events, logger *slog.Logger) http.HandlerF
 		}
 		var difficulty *db.RaidDifficulty
 		if body.Difficulty != nil {
-			d := db.RaidDifficulty(*body.Difficulty)
+			d, err := parseRaidDifficulty(*body.Difficulty)
+			if err != nil {
+				writeError(w, logger, http.StatusBadRequest, err.Error())
+				return
+			}
 			difficulty = &d
 		}
 		if !validReminderLead(body.ReminderLeadMinutes) {

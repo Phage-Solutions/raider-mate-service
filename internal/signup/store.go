@@ -204,7 +204,8 @@ func (s *Store) ListPastEvents(ctx context.Context, discordGuildID int64) ([]Eve
 // UpdateEvent applies a partial edit and, whenever StartsAt or SignupDeadline moved,
 // cancels every PENDING job for the event and reschedules from the new times, all in
 // one transaction (design.md section 6: cancel on edit rather than validating at fire
-// time).
+// time). An edit to anything a reader sees also queues the redraw, in the same
+// transaction, so the sheet in the channel cannot disagree with the stored event.
 func (s *Store) UpdateEvent(ctx context.Context, in UpdateEventInput) (Event, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -248,6 +249,20 @@ func (s *Store) UpdateEvent(ctx context.Context, in UpdateEventInput) (Event, er
 		}
 		if err := scheduleJobs(ctx, q, row.ID, row.StartsAt.Time, row.SignupDeadline.Time, lead); err != nil {
 			return Event{}, err
+		}
+	}
+
+	if in.changesWhatIsPosted() && row.MessageID != nil && row.ChannelID != nil {
+		if _, err := q.InsertNotification(ctx, db.InsertNotificationParams{
+			ID:             db.NewID(),
+			DiscordGuildID: row.DiscordGuildID,
+			EventID:        row.ID,
+			Kind:           db.NotificationKindEVENTCHANGED,
+			TargetKind:     db.NotificationTargetMESSAGE,
+			ChannelID:      row.ChannelID,
+			Payload:        []byte("{}"),
+		}); err != nil {
+			return Event{}, fmt.Errorf("queueing event redraw: %w", err)
 		}
 	}
 

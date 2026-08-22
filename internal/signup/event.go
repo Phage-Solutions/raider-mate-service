@@ -74,6 +74,22 @@ type UpdateEventInput struct {
 	WarcraftLogsURL *string
 }
 
+// changesWhatIsPosted answers whether this edit is worth redrawing the signup sheet for.
+//
+// MessageID and ChannelID are the bot recording the post it has just made, which is the
+// one edit that arrives with the message already correct. Redrawing on it would have the
+// bot immediately re-edit a message it wrote a moment ago, every time it announces an
+// event. Everything else here reaches a raider reading the channel.
+func (in UpdateEventInput) changesWhatIsPosted() bool {
+	return in.Title != nil ||
+		in.StartsAt != nil ||
+		in.SignupDeadline != nil ||
+		in.CompTemplate != nil ||
+		in.Difficulty != nil ||
+		in.ReminderLeadMinutes != nil ||
+		in.WarcraftLogsURL != nil
+}
+
 // eventStore is the persistence Events needs. Declared here, by the consumer.
 type eventStore interface {
 	CreateEvent(ctx context.Context, in CreateEventInput) (Event, error)

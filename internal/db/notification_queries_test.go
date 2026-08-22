@@ -266,3 +266,33 @@ func TestInsertNotificationAcceptsCompSlotDropped(t *testing.T) {
 		t.Fatalf("claimed = %+v, want one COMP_SLOT_DROPPED row", claimed)
 	}
 }
+
+// Same reasoning as the COMP_SLOT_DROPPED test above: the kind arrived in migration
+// 00012, and an event edit is the only thing that writes it.
+func TestInsertNotificationAcceptsEventChanged(t *testing.T) {
+	ctx := context.Background()
+	q, _ := newTxQueries(ctx, t)
+
+	event := seedEventForJobs(ctx, t, q, 46)
+	channelID := int64(555)
+
+	if _, err := q.InsertNotification(ctx, InsertNotificationParams{
+		ID:             NewID(),
+		DiscordGuildID: 100,
+		EventID:        event.ID,
+		Kind:           NotificationKindEVENTCHANGED,
+		TargetKind:     NotificationTargetMESSAGE,
+		ChannelID:      &channelID,
+		Payload:        []byte(`{}`),
+	}); err != nil {
+		t.Fatalf("inserting EVENT_CHANGED notification: %v", err)
+	}
+
+	claimed, err := q.ClaimNotifications(ctx, claimParams(10, nil))
+	if err != nil {
+		t.Fatalf("claiming: %v", err)
+	}
+	if len(claimed) != 1 || claimed[0].Kind != NotificationKindEVENTCHANGED {
+		t.Fatalf("claimed = %+v, want one EVENT_CHANGED row", claimed)
+	}
+}
