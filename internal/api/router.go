@@ -6,11 +6,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/audit"
-	"github.com/Phage-Solutions/raider-mate-service/internal/billing"
-	"github.com/Phage-Solutions/raider-mate-service/internal/comp"
-	"github.com/Phage-Solutions/raider-mate-service/internal/roster"
-	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
+	"github.com/Raider-Mate/raider-mate-service/internal/audit"
+	"github.com/Raider-Mate/raider-mate-service/internal/billing"
+	"github.com/Raider-Mate/raider-mate-service/internal/comp"
+	"github.com/Raider-Mate/raider-mate-service/internal/roster"
+	"github.com/Raider-Mate/raider-mate-service/internal/signup"
 )
 
 // NewRouter builds the HTTP handler tree for the service. Wiring is by hand: each

@@ -14,7 +14,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/Phage-Solutions/raider-mate-service/migrations"
+	"github.com/Raider-Mate/raider-mate-service/migrations"
 )
 
 var pool *pgxpool.Pool

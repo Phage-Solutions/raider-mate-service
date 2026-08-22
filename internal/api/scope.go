@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
+	"github.com/Raider-Mate/raider-mate-service/internal/signup"
 )
 
 // eventLookup is enough to answer "which guild owns this event". Declared here by the

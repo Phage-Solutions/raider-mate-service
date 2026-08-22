@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
 )
 
 // ReplaceComp is what a comp write is: the full set of assignments for one event and

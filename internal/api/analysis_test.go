@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/audit"
-	"github.com/Phage-Solutions/raider-mate-service/internal/billing"
+	"github.com/Raider-Mate/raider-mate-service/internal/audit"
+	"github.com/Raider-Mate/raider-mate-service/internal/billing"
 )
 
 // emptyAnalysisStore answers every read with nothing. These tests are about link sets

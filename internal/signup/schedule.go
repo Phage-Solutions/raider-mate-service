@@ -3,7 +3,7 @@ package signup
 import (
 	"time"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
 )
 
 // Job is one job jobsFor decided to schedule: a kind and when it should run.

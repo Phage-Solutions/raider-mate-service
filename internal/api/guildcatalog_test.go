@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
+	"github.com/Raider-Mate/raider-mate-service/internal/signup"
 )
 
 // fakeCatalogStore satisfies the unexported interface signup.NewGuildCatalog takes.

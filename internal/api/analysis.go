@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/audit"
-	"github.com/Phage-Solutions/raider-mate-service/internal/billing"
+	"github.com/Raider-Mate/raider-mate-service/internal/audit"
+	"github.com/Raider-Mate/raider-mate-service/internal/billing"
 )
 
 // periodResponse is the window every panel describes, embedded so a client reading two

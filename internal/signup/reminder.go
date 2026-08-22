@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
 )
 
 // maxJobAttempts is how many failed resolutions a job tolerates before it stops

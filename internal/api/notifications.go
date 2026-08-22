@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
+	"github.com/Raider-Mate/raider-mate-service/internal/signup"
 )
 
 type notificationResponse struct {

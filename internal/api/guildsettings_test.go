@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
+	"github.com/Raider-Mate/raider-mate-service/internal/signup"
 )
 
 // fakeSettingsStore satisfies the unexported interface signup.NewSettings takes.

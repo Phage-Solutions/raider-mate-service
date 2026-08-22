@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/billing"
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/billing"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
 )
 
 // Window is how far back every panel looks. One number, applied to all of them, so a

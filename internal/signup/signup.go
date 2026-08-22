@@ -15,7 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
 )
 
 // selfReported are the statuses a raider may write about their own character. ABSENT

@@ -1,4 +1,4 @@
-module github.com/Phage-Solutions/raider-mate-service
+module github.com/Raider-Mate/raider-mate-service
 
 go 1.26.6
 

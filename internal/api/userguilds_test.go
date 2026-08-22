@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/roster"
+	"github.com/Raider-Mate/raider-mate-service/internal/roster"
 )
 
 func TestListUserGuildsRefusesToAnswerAboutSomebodyElse(t *testing.T) {

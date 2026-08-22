@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
-	"github.com/Phage-Solutions/raider-mate-service/internal/roster"
-	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/roster"
+	"github.com/Raider-Mate/raider-mate-service/internal/signup"
 )
 
 type signupResponse struct {

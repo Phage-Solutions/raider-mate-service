@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
-	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/signup"
 )
 
 func TestSignupLinksPresentOnYourOwnSignup(t *testing.T) {

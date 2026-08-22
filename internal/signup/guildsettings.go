@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
 )
 
 // GuildSettings is a guild's bot configuration. Every field is optional: a guild that

@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
-	"github.com/Phage-Solutions/raider-mate-service/internal/roster"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/roster"
 )
 
 // fakeCharacterStore satisfies the unexported interface roster.NewCharacters takes.

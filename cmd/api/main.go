@@ -14,9 +14,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/api"
-	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
-	"github.com/Phage-Solutions/raider-mate-service/migrations"
+	"github.com/Raider-Mate/raider-mate-service/internal/api"
+	"github.com/Raider-Mate/raider-mate-service/internal/signup"
+	"github.com/Raider-Mate/raider-mate-service/migrations"
 )
 
 // Set at build time with -X main.version. Unlike a JVM manifest, a Go binary carries

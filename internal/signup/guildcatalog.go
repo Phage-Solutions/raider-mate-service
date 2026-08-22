@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
 )
 
 // Channel is one of a guild's Discord channels, as the bot last reported it.

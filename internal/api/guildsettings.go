@@ -18,8 +18,8 @@ import (
 	// and a second binary cannot lose it.
 	_ "time/tzdata"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
-	"github.com/Phage-Solutions/raider-mate-service/internal/signup"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/signup"
 )
 
 type guildSettingsResponse struct {

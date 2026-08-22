@@ -91,7 +91,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/phage-solutions/raider-mate-service
+          images: ghcr.io/raider-mate/raider-mate-service
           flavor: latest=auto
           tags: |
             type=semver,pattern={{version}}

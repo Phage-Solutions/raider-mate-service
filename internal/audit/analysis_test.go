@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/billing"
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/billing"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
 )
 
 // stubStore answers with whatever the test put in it. Every field is the raw shape the

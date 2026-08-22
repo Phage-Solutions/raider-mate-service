@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/db"
+	"github.com/Raider-Mate/raider-mate-service/internal/db"
 )
 
 // The bot records the post it just made through the same PATCH path a raid lead edits

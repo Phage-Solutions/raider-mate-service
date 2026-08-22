@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Phage-Solutions/raider-mate-service/internal/raiderio"
-	"github.com/Phage-Solutions/raider-mate-service/internal/roster"
+	"github.com/Raider-Mate/raider-mate-service/internal/raiderio"
+	"github.com/Raider-Mate/raider-mate-service/internal/roster"
 )
 
 type characterResponse struct {
